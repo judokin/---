@@ -32,7 +32,7 @@ UPLOAD_HISTORY_FILE = Path(r'D:\NAS_download\uploaded_files.json')
 FEISHU_PARENT_NODE = 'RE9OfQ3PFlwErcdrJXUceUKZn5c'
 GENERATED_FILE_RE = re.compile(r'.+_\d{14}\.xlsm$', re.IGNORECASE)
 
-config_file_path = r'D:\rpa_tools\feishu\config.py'
+config_file_path = Path(__file__).parent / 'config.py'
 spec = importlib.util.spec_from_file_location('config', config_file_path)
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
@@ -105,10 +105,7 @@ def upload_file(
 
 def send_message(
     message: str,
-    webhook_url: str = (
-        'https://open.feishu.cn/open-apis/bot/v2/hook/'
-        '53eda273-cc3d-4092-bfb8-01d6d5122aa5'
-    ),
+    webhook_url: str = config.webhook_url_upload,
 ) -> None:
     """发送上传结果通知；通知失败不改变文件的上传成功状态。"""
     payload = {

@@ -117,6 +117,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.utils import get_column_letter
+from pathlib import Path
 
 # Windows 本地控制台通常使用 GBK；文案中可能包含 U+2011 等无法编码字符。
 # 日志显示时替换不可编码字符，避免 print 中断数据处理流程。
@@ -129,7 +130,7 @@ OUT_FILE_RES = False
 TEST_MODE = True
 TEST_MODE = False
 # 指定文件路径
-config_file_path = r"D:\rpa_tools\feishu\config.py"
+config_file_path = Path(__file__).parent / "config.py"
 
 # 加载模块
 spec = importlib.util.spec_from_file_location("config", config_file_path)
@@ -152,8 +153,7 @@ tenant_access_token = response.json()["tenant_access_token"]
 def send(text):
     import requests
     import json
-    # 替换为你的飞书 Webhook URL
-    webhook_url = "https://open.feishu.cn/open-apis/bot/v2/hook/9630ae9b-8af0-4a54-bdd9-64409e567ec4"
+    webhook_url = config.webhook_url_v2
 
     # 发送的消息内容
     message = {
