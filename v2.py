@@ -281,6 +281,8 @@ def process_file(data_path):
         "包装级别": "M",
         "包装重量": "GR",
         "包装重量单位": "GS",
+        "Item Weight": "DW",
+        "Item Weight Unit": "DX",
         "包装长度": "GL",
         "包装长度单位": "GM",
         "包装高度": "GP",
@@ -368,6 +370,8 @@ def process_file(data_path):
             "包装宽度单位": "IA",
             "包装重量": "ID",
             "包装重量单位": "IE",
+            "Item Weight": "IQ",
+            "Item Weight Unit": "IR",
             "包装长度": "HX",
             "包装长度单位": "HY",
             "包装高度": "IB",
@@ -590,17 +594,24 @@ def process_file(data_path):
             if final_value is not None:
                 write_matrix[row_idx][target_col_num - 1] = final_value
 
-    # FA 写死值：Fulfillment by Merchant (Default)
-    fa_col_num = col_letter_to_num("FA")  # 141
-    if fa_col_num > max_col:
-        # 扩展矩阵列以容纳 FA
+    # 按当前店铺模板的“物流渠道代码 (US)”目标列写入固定值。
+    # 冬豚模板位于 GM，岚风、北蓉和灿东模板位于 FA。
+    fulfillment_col_letter = feishu_to_template_mapping["物流渠道代码 (US)"]
+    fulfillment_col_num = col_letter_to_num(fulfillment_col_letter)
+    if fulfillment_col_num > max_col:
+        # 扩展矩阵列以容纳当前模板的物流渠道列。
         for row in write_matrix:
-            row.extend([None] * (fa_col_num - max_col))
-        max_col = fa_col_num
-    fa_col_idx = fa_col_num - 1  # 0-based index
+            row.extend([None] * (fulfillment_col_num - max_col))
+        max_col = fulfillment_col_num
+    fulfillment_col_idx = fulfillment_col_num - 1  # 0-based index
     for row_idx in range(rows_count):
-        write_matrix[row_idx][fa_col_idx] = "Fulfillment by Merchant (Default)"
-    print(f"FA 列已写死为：Fulfillment by Merchant (Default)")
+        write_matrix[row_idx][fulfillment_col_idx] = (
+            "Fulfillment by Merchant (Default)"
+        )
+    print(
+        f"{fulfillment_col_letter} 列（物流渠道代码）已写死为："
+        "Fulfillment by Merchant (Default)"
+    )
 
     # 一次性写入整块区域
     write_range = sheet.range(f"A{start_row}").resize(rows_count, max_col)
