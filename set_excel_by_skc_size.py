@@ -26,6 +26,7 @@ DEFAULT_INPUT_DIR = DEFAULT_INPUT_PATH.parent
 DEFAULT_INPUT_PATTERN = "output_feishu_table_data_*.xlsx"
 MATCHED_FILE_SUFFIX = "_尺寸图片已匹配"
 DEFAULT_IMAGE_ROOT = Path(r"D:\NAS_download")
+DEFAULT_MISSING_IMAGE_SKCS_PATH = DEFAULT_INPUT_DIR / "缺少图片的SKC.txt"
 RUG_MATERIAL = "印花地毯"
 
 IMAGE_COLUMNS = [
@@ -224,6 +225,7 @@ def match_rug_images(
     target_df["材质方向"] = target_df["材质方向"].map(normalize_text)
 
     processed_skcs: list[str] = []
+    missing_image_skcs: list[str] = []
     skipped_skcs: dict[str, str] = {}
     matched_rows = 0
 
@@ -241,6 +243,7 @@ def match_rug_images(
 
         image_data_path = image_root / skc / f"{skc}data.xlsx"
         if not image_data_path.is_file():
+            missing_image_skcs.append(skc)
             skipped_skcs[skc] = f"图片数据文件不存在：{image_data_path}"
             continue
 
@@ -272,6 +275,7 @@ def match_rug_images(
     return {
         "output_path": output_path,
         "processed_skcs": processed_skcs,
+        "missing_image_skcs": missing_image_skcs,
         "skipped_skcs": skipped_skcs,
         "matched_rows": matched_rows,
     }
@@ -308,6 +312,12 @@ def parse_args() -> argparse.Namespace:
         "--in-place",
         action="store_true",
         help="直接覆盖输入文件",
+    )
+    parser.add_argument(
+        "--missing-image-output",
+        type=Path,
+        default=DEFAULT_MISSING_IMAGE_SKCS_PATH,
+        help="缺少图片数据文件的 SKC 文本清单路径",
     )
     return parser.parse_args()
 
@@ -363,6 +373,7 @@ def main() -> None:
 
     succeeded_files = []
     failed_files = []
+    missing_image_skcs: list[str] = []
     for file_index, input_path in enumerate(input_files, start=1):
         print(
             f"\n========== 处理 [{file_index}/{len(input_files)}]："
@@ -382,7 +393,19 @@ def main() -> None:
             print(f"处理失败，继续下一文件：{input_path.name}，原因：{exc}")
         else:
             succeeded_files.append(Path(result["output_path"]))
+            missing_image_skcs.extend(result["missing_image_skcs"])
             print_result(result)
+
+    unique_missing_image_skcs = list(dict.fromkeys(missing_image_skcs))
+    args.missing_image_output.parent.mkdir(parents=True, exist_ok=True)
+    args.missing_image_output.write_text(
+        "".join(f"{skc}\n" for skc in unique_missing_image_skcs),
+        encoding="utf-8",
+    )
+    print(
+        f"缺少图片数据文件的 SKC：{len(unique_missing_image_skcs)} 个，"
+        f"清单已保存至：{args.missing_image_output}"
+    )
 
     print(
         f"\n批量处理完成：成功 {len(succeeded_files)} 个，"
