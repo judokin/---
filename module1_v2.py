@@ -128,7 +128,7 @@ OUT_FILE_RES = False
 # True：测试模式，只生成本地 Excel，不新增或更新飞书子表。
 # False：正式模式，生成 Excel，同时新增并更新飞书子表。
 TEST_MODE = False
-TEST_MODE = True
+# TEST_MODE = True
 # 指定文件路径
 config_file_path = Path(__file__).parent / "config.py"
 
