@@ -26,8 +26,11 @@ DEFAULT_INPUT_DIR = DEFAULT_INPUT_PATH.parent
 DEFAULT_INPUT_PATTERN = "output_feishu_table_data_*.xlsx"
 MATCHED_FILE_SUFFIX = "_尺寸图片已匹配"
 DEFAULT_IMAGE_ROOT = Path(r"D:\NAS_download")
+FALLBACK_IMAGE_ROOT = Path(r"D:\oss")
 DEFAULT_MISSING_IMAGE_SKCS_PATH = DEFAULT_INPUT_DIR / "缺少图片的SKC.txt"
 RUG_MATERIAL = "印花地毯"
+KITCHEN_MAT_MATERIAL = "仿羊绒厨房垫"
+SUPPORTED_MATERIALS = {RUG_MATERIAL, KITCHEN_MAT_MATERIAL}
 
 IMAGE_COLUMNS = [
     "主图片 URL",
@@ -84,13 +87,69 @@ def urls(rows: pd.DataFrame) -> list[str]:
 
 def pick_named_url(image_df: pd.DataFrame, *keywords: str) -> str:
     """按文件名关键词优先级取得图片地址。"""
-    file_names = image_df["文件名"].map(lambda value: normalize_text(value).upper())
+    def normalize_image_name(value: object) -> str:
+        return (
+            normalize_text(value)
+            .upper()
+            .replace("×", "X")
+            .replace("＋", "+")
+            .replace(" ", "")
+        )
+
+    file_names = image_df["文件名"].map(normalize_image_name)
     for keyword in keywords:
-        matched = image_df[file_names.str.contains(keyword.upper(), regex=False)]
+        normalized_keyword = normalize_image_name(keyword)
+        matched = image_df[
+            file_names.str.contains(normalized_keyword, regex=False)
+        ]
         url = first_url(matched)
         if url:
             return url
     return ""
+
+
+def pick_sample_url(image_df: pd.DataFrame) -> str:
+    """优先按图片类型选择样本图，再兼容 SWATCH/SWITCH 文件名。"""
+    if "图片类型" in image_df.columns:
+        image_types = image_df["图片类型"].map(normalize_text)
+        url = first_url(image_df[image_types == "样本图片"])
+        if url:
+            return url
+    return pick_named_url(image_df, "SWATCH", "SWITCH")
+
+
+def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
+    """按文件名给仿羊绒厨房垫匹配固定顺序的图片 URL。"""
+    required_columns = {"文件名", "图片地址"}
+    missing_columns = sorted(required_columns - set(image_df.columns))
+    if missing_columns:
+        raise ValueError(f"图片数据文件缺少字段：{missing_columns}")
+
+    return {
+        "主图片 URL": pick_named_url(image_df, "20X32+20X48厨房垫"),
+        "其他图片 URL1": pick_named_url(
+            image_df,
+            "封面图2X5厨房",
+            "2X5厨房",
+        ),
+        "其他图片 URL2": pick_named_url(
+            image_df,
+            "封面图2X3门口",
+            "2X3门口",
+        ),
+        "其他图片 URL3": pick_named_url(image_df, "2X5走廊"),
+        "其他图片 URL4": pick_named_url(image_df, "120X170单椅"),
+        "其他图片 URL5": pick_named_url(
+            image_df,
+            "2X5尺寸白底图",
+            "白底图2X5",
+            "2X5白底图",
+        ),
+        "其他图片 URL6": "",
+        "其他图片 URL7": "",
+        "其他图片 URL8": "",
+        "样本图片 URL": pick_sample_url(image_df),
+    }
 
 
 def assign_urls(
@@ -102,6 +161,18 @@ def assign_urls(
     for column, value in values.items():
         if value:
             target_df.at[row_index, column] = value
+
+
+def find_image_data_path(image_root: Path, skc: str) -> tuple[Path | None, list[Path]]:
+    """优先读取 NAS 图片表，找不到时回退到 D:\\oss\\<SKC>.xlsx。"""
+    candidates = [
+        image_root / skc / f"{skc}data.xlsx",
+        FALLBACK_IMAGE_ROOT / f"{skc}.xlsx",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate, candidates
+    return None, candidates
 
 
 def build_image_pool(image_df: pd.DataFrame) -> dict[str, object]:
@@ -206,7 +277,7 @@ def match_rug_images(
     output_path: Path,
     image_root: Path = DEFAULT_IMAGE_ROOT,
 ) -> dict[str, object]:
-    """读取目标 Excel，并给材质方向为印花地毯的 SKC 匹配尺寸图片。"""
+    """读取目标 Excel，并按材质方向给 SKC 匹配图片。"""
     if not input_path.is_file():
         raise FileNotFoundError(f"目标 Excel 不存在：{input_path}")
 
@@ -235,16 +306,20 @@ def match_rug_images(
         materials = list(dict.fromkeys(
             value for value in skc_rows["材质方向"].tolist() if value
         ))
-        if materials != [RUG_MATERIAL]:
+        if len(materials) != 1 or materials[0] not in SUPPORTED_MATERIALS:
             skipped_skcs[skc] = (
-                f"材质方向不是“{RUG_MATERIAL}”：{materials or ['<空>']}"
+                f"材质方向不受支持或不唯一：{materials or ['<空>']}"
             )
             continue
+        material = materials[0]
 
-        image_data_path = image_root / skc / f"{skc}data.xlsx"
-        if not image_data_path.is_file():
+        image_data_path, checked_paths = find_image_data_path(image_root, skc)
+        if image_data_path is None:
             missing_image_skcs.append(skc)
-            skipped_skcs[skc] = f"图片数据文件不存在：{image_data_path}"
+            skipped_skcs[skc] = (
+                "图片数据文件不存在，已检查："
+                + "；".join(str(path) for path in checked_paths)
+            )
             continue
 
         image_df = pd.read_excel(image_data_path)
@@ -256,7 +331,13 @@ def match_rug_images(
             skipped_skcs[skc] = "图片数据文件中没有该 SKC 的记录"
             continue
 
-        pool = build_image_pool(image_df)
+        if material == RUG_MATERIAL:
+            pool = build_image_pool(image_df)
+            kitchen_values = None
+        else:
+            pool = None
+            kitchen_values = kitchen_mat_image_values(image_df)
+
         for row_index in skc_rows.index:
             size = normalize_size(target_df.at[row_index, "size_text"])
             if not size:
@@ -265,7 +346,9 @@ def match_rug_images(
             assign_urls(
                 target_df,
                 row_index,
-                image_values_for_size(size, pool),
+                image_values_for_size(size, pool)
+                if material == RUG_MATERIAL
+                else kitchen_values,
             )
             matched_rows += 1
         processed_skcs.append(skc)

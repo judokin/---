@@ -21,8 +21,6 @@ from pathlib import Path
 input_dir = Path(r'D:\项目文件\AI自动上架')
 input_pattern = '*尺寸图片已匹配.xlsx'
 template_dir = Path(r'D:\项目文件\AI自动上架\模板文件')
-output_path = input_dir / '印花地毯-模板文件_v2__工作文件.xlsm'
-
 _active_app = None
 _active_wb = None
 _active_work_path = None
@@ -125,13 +123,21 @@ def process_file(data_path):
             )
         return values[0]
 
-    # 根据“FBM上架店铺”动态选择对应的账号模板。
+    # 根据“材质方向 + FBM上架店铺”动态选择对应的账号模板。
+    material_direction = get_unique_required_value("材质方向")
     store_name = get_unique_required_value("FBM上架店铺")
-    template_path = template_dir / f"印花地毯-模板文件v2_{store_name}.xlsm"
+    template_path = template_dir / (
+        f"{material_direction}-模板文件v2_{store_name}.xlsm"
+    )
     if not template_path.is_file():
         raise FileNotFoundError(
-            f"未找到 FBM 上架店铺“{store_name}”对应的模板：{template_path}"
+            f"未找到材质方向“{material_direction}”、"
+            f"FBM 上架店铺“{store_name}”对应的模板：{template_path}"
         )
+    output_path = input_dir / (
+        f"{material_direction}-模板文件_v2__工作文件.xlsm"
+    )
+    print(f"材质方向：{material_direction}")
     print(f"FBM上架店铺：{store_name}")
     print(f"匹配模板：{template_path}")
 
@@ -510,11 +516,69 @@ def process_file(data_path):
     store_mapping_overrides["亚马逊--岚风（子账号）"] = lanfeng_mapping.copy()
     store_mapping_overrides["亚马逊-北蓉-北美（子账号）"] = lanfeng_mapping.copy()
 
+    # 材质 + 店铺专属映射。目标列按模板第 5 行 Amazon 属性 ID 核对，
+    # 避免同一店铺的不同商品类型模板因列序变化而写错字段。
+    material_store_mapping_overrides = {
+        ("仿羊绒厨房垫", "亚马逊--冬豚--北美（子账号）"): {
+            "pattern": "BZ",
+            "不含税价目表": "DY",
+            "Back Material Type": "CR",
+            "Construction Type": "BA",
+            "Item Shape": "BF",
+            "Pile Height": "BX",
+            "Recommended Uses For Product1": "CL",
+            "Recommended Uses For Product2": "CM",
+            "Recommended Uses For Product3": "CN",
+            "Recommended Uses For Product4": "CO",
+            "Recommended Uses For Product5": "CP",
+            "Room Type1": "CX",
+            "Room Type2": "CY",
+            "Room Type3": "CZ",
+            "Room Type4": "DA",
+            "Room Type5": "DB",
+            "Size": "AZ",
+            "Weave Type": "BL",
+            "包装宽度": "FY",
+            "包装宽度单位": "FZ",
+            "包装重量": "GC",
+            "包装重量单位": "GD",
+            "包装长度": "FW",
+            "包装长度单位": "FX",
+            "包装高度": "GA",
+            "包装高度单位": "GB",
+            "原产国": "GM",
+            "商品厚度单位": "DE",
+            "商品宽度单位": "DL",
+            "商品是否抗污": "CQ",
+            "商品状况": "DW",
+            "商品短边的宽度": "DK",
+            "商品长度单位": "DJ",
+            "商品长边的长度": "DI",
+            "地毯款式类型": "DM",
+            "处理时间 (US)": "EX",
+            "您的价格 USD (在亚马逊上出售, US)": "FA",
+            "数量 (US)": "EW",
+            "最大订单数量": "EB",
+            "物流渠道代码 (US)": "EV",
+            "箱子数量": "GE",
+            "适合室内外使用": "DF",
+            "零件编号": "BC",
+            "商品尺寸": "AZ",
+            "颜色": "AY",
+        },
+    }
+
     mapping_overrides = store_mapping_overrides.get(store_name, {})
     feishu_to_template_mapping.update(mapping_overrides)
+    material_mapping_overrides = material_store_mapping_overrides.get(
+        (material_direction, store_name),
+        {},
+    )
+    feishu_to_template_mapping.update(material_mapping_overrides)
     print(
         f"店铺 mapping：{store_name}，"
-        f"按当前模板调整 {len(mapping_overrides)} 个字段"
+        f"按店铺调整 {len(mapping_overrides)} 个字段，"
+        f"按材质模板调整 {len(material_mapping_overrides)} 个字段"
     )
 
     # 步骤4: 按 Header 名称构建列映射。

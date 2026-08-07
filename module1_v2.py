@@ -128,7 +128,7 @@ OUT_FILE_RES = False
 # True：测试模式，只生成本地 Excel，不新增或更新飞书子表。
 # False：正式模式，生成 Excel，同时新增并更新飞书子表。
 TEST_MODE = False
-# TEST_MODE = True
+TEST_MODE = True
 # 指定文件路径
 config_file_path = Path(__file__).parent / "config.py"
 
@@ -420,11 +420,12 @@ def timestamp_ms_to_datetime(
     return dt.strftime(fmt)
 
 
-def get_table_data():
+def get_table_data(material_direction=None):
     '''
     父类子类基础数据
     先匹配子类，再匹配父类
     '''
+    material_direction = str(material_direction or '').strip()
     items_list = get_five_points_table_data()
     parent_items_dict = {}
     for item in items_list:
@@ -454,21 +455,28 @@ def get_table_data():
             pass
         else:
             pass
+        conditions = [
+            {
+                "field_name": "父体SKU",
+                "operator": "isNotEmpty",
+                "value": []
+            },
+            {
+                "field_name": "FBM上架店铺",
+                "operator": "is",
+                "value": [glv['gvar_shop_name']]
+            }
+        ]
+        if material_direction:
+            conditions.append({
+                "field_name": "材质方向",
+                "operator": "is",
+                "value": [material_direction]
+            })
         data ={
             "filter": {
                 "conjunction": "and",
-                "conditions": [
-                    {
-                        "field_name": "父体SKU",
-                        "operator": "isNotEmpty",
-                        "value": []
-                    }
-                   ,{
-               "field_name": "FBM上架店铺",
-               "operator": "is",
-               "value": [glv['gvar_shop_name']]
-                   }
-                ]
+                "conditions": conditions
             }
         }
         print(data)
@@ -496,7 +504,6 @@ def get_table_data():
             else:
                 parent_item_text_info = list(parent_items_dict.values())[0]
                 continue
-            key_word_str = "".join(items['fields'])
             # import random
             # my_list = random.choice(items_list)
             five_point_texts = []
@@ -506,6 +513,12 @@ def get_table_data():
                 glv['材质方向'] = items['fields']['材质方向'][0]
             except:
                 print('continue002材质方向为空，跳过')
+                continue
+            if material_direction and glv['材质方向'] != material_direction:
+                print(
+                    f"材质方向不匹配，跳过：实际={glv['材质方向']}，"
+                    f"筛选={material_direction}"
+                )
                 continue
             # if '印花地毯' != glv['材质方向']:
             #     import pdb;pdb.set_trace()
@@ -640,11 +653,16 @@ def get_table_data():
                 if '仿羊绒厨房垫' == glv['材质方向']:
                     if '仿羊绒厨房垫-Item Name 20 x32" +20 x48"' not in parent_item_text_info['fields']:
                         items['fields'][f'20X32-20X48的标题'] = ''
-                        items['fields'][f'20X32-20X48的副标题'] = ''
                     else:
                         items['fields'][f'20X32-20X48的标题']= parent_item_text_info['fields']['仿羊绒厨房垫-Item Name 20 x32" +20 x48"']
-                        items['fields'][f'20X32-20X48的副标题'] = ''
-                    print(f"商品名称{s_txt}:", items['fields'][f'{s_txt}的标题'])
+                    items['fields'][f'20X32-20X48的副标题'] = get_feishu_field_text(
+                        parent_item_text_info['fields'],
+                        '仿羊绒厨房垫-Item Highlight 20 x32" +20 x48"'
+                    )
+                    print(
+                        "商品名称20X32-20X48:",
+                        items['fields']['20X32-20X48的标题']
+                    )
                 if '三明治户外垫' == glv['材质方向']:
                     title_size_list = [
                         '2X3',
@@ -679,7 +697,7 @@ def get_table_data():
             #     pass
             if skc == '':
                 continue
-            if "标题" in key_word_str:
+            if skc:
                 skc_datas[skc] = {}
                 skc_datas[skc]['pskc'] = pskc
                 skc_datas[skc]['材质方向'] = glv['材质方向']
@@ -856,9 +874,15 @@ def _generate_single_shop(
     # 厨房垫 https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tbl18dyMkn1KS8KH&view=vew294Yp4d
     guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tbl18dyMkn1KS8KH')
     gd_dict['仿羊绒厨房垫'] = guding_info
+    for st in guding_info:
+        if 'Size' in guding_info[st]:
+            guding_info[st]['商品尺寸'] = guding_info[st]['Size']
     # 三明治 https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblCffxAeXGnocAY&view=vewzrq6EcO
     guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblCffxAeXGnocAY')
     gd_dict['三明治户外垫'] = guding_info
+    for st in guding_info:
+        if 'Size' in guding_info[st]:
+            guding_info[st]['商品尺寸'] = guding_info[st]['Size']
     try:
         # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblMsoJKlpVM7iNJ&view=vew9NA2BTM
         w_list = []
@@ -1014,7 +1038,11 @@ def _generate_single_shop(
             "团队": skc_datas[skc]['运营团队'],
             "对应运营": skc_datas[skc]['对应运营'],
             "花型上架日期（RPA回传)": skc_datas[skc]['创建日期'],
-            "商品尺寸": guding_info[size_text]['商品尺寸'],
+            "商品尺寸": (
+                guding_info[size_text].get('商品尺寸')
+                or guding_info[size_text].get('Size')
+                or size_text
+            ),
             "材质方向": skc_datas[skc]['材质方向'],
             "size_text": size_text,
 
@@ -1081,11 +1109,15 @@ def _generate_single_shop(
     # list(list(dd.values())[0].values())[0]['图所在NAS盘地址'] 写入 nas_dir_path 保存为 nas_path.txt 
     nas_path_list = []
     # import pdb;pdb.set_trace()
-    for ddk in skc_datas:
-        print("ddk ~~~", ddk)
-        if '图所在NAS盘地址' in skc_datas[ddk]['2X3']:
-            nas_path = skc_datas[ddk]['2X3']['图所在NAS盘地址']
-            nas_path_list.append(nas_path)
+    for skc, skc_data in skc_datas.items():
+        print("ddk ~~~", skc)
+        for size_data in skc_data.values():
+            if not isinstance(size_data, dict):
+                continue
+            nas_path = size_data.get('图所在NAS盘地址', '')
+            if nas_path:
+                nas_path_list.append(nas_path)
+                break
     print("nas_path_list ", nas_path_list)
     open(os.path.join( nas_dir_path, 'nas_path.txt' ), 'w', encoding='utf-8' ).write(",".join(nas_path_list))
     # open(os.path.join( nas_dir_path, './skcinfo/amz_' + skc + ".json"), 'w', encoding='utf-8' ).write(json.dumps(dd, indent=4, ensure_ascii=False))
@@ -1292,19 +1324,19 @@ def _generate_single_shop(
         parent_data_item['色表'] = ''
         parent_data_item['Product Description'] = get_feishu_field_text(
             parent_fields, 'Product Description', '关于此艺术品'
-        )
+        ) or f"GENIMO {parent_data_item.get('品牌', 'Rugs')} - Premium Quality Washable Area Rug"
         parent_data_item['Manufacturer'] = get_feishu_field_text(
             parent_fields, 'Manufacturer', '制造商'
-        )
+        ) or 'GENIMO'
         parent_data_item['商品 ID'] = get_feishu_field_text(
             parent_fields, '商品 ID'
-        )
+        ) or ''
         parent_data_item['商品编号类型'] = get_feishu_field_text(
             parent_fields, '商品编号类型', '商品编码类型'
-        )
+        ) or 'ASIN'
         parent_data_item['Brand Name'] = get_feishu_field_text(
             parent_fields, 'Brand Name', '品牌'
-        )
+        ) or parent_data_item.get('品牌', 'GENIMO')
         message = ''
         for index in range(len(data_to_excel)):
             # data_to_excel[index]['商品名称'] = data_to_excel[index]['品牌'] + " " + data_to_excel[index]['商品名称']
@@ -1483,10 +1515,11 @@ def _generate_single_shop(
     return output_feishu_path
 
 
-def m(test_mode=None):
-    """遍历全部店铺，并生成 SKCS.txt 中全部可处理 SKC。"""
+def m(test_mode=None, material_direction=None):
+    """遍历全部店铺，并生成指定材质方向的可处理 SKC。"""
     if test_mode is None:
         test_mode = TEST_MODE
+    material_direction = str(material_direction or '').strip()
 
     skcs_path = r"D:\NAS_download\SKCS.txt"
     if not os.path.isfile(skcs_path):
@@ -1507,9 +1540,10 @@ def m(test_mode=None):
         raise ValueError("gvar_shop_name_list 为空，且未设置 gvar_shop_name")
 
     mode_name = "测试模式（不写飞书子表）" if test_mode else "正式模式（写飞书子表）"
+    material_name = material_direction or "全部材质"
     print(
         f"开始批量生成：{mode_name}，店铺 {len(shop_name_list)} 个，"
-        f"SKCS.txt 共 {len(skcs)} 个 SKC"
+        f"SKCS.txt 共 {len(skcs)} 个 SKC，材质方向：{material_name}"
     )
 
     generated_paths = []
@@ -1521,7 +1555,7 @@ def m(test_mode=None):
                 f"\n========== 店铺 [{shop_index}/{len(shop_name_list)}]："
                 f"{shop_name} =========="
             )
-            shop_skc_datas = get_table_data()
+            shop_skc_datas = get_table_data(material_direction=material_direction)
             matched_skcs = [skc for skc in skcs if skc in shop_skc_datas]
             parent_batches = {}
             for skc in matched_skcs:
@@ -1573,11 +1607,31 @@ def m(test_mode=None):
     return generated_paths
 
 
+def get_material_direction_arg(args):
+    """兼容命令行、RPA 字典和直接字符串形式的材质方向入参。"""
+    if args is None:
+        return None
+    if isinstance(args, str):
+        return args.strip() or None
+    if isinstance(args, dict):
+        value = args.get('material_direction', args.get('材质方向'))
+        return str(value).strip() if value else None
+    value = getattr(args, 'material_direction', None)
+    return str(value).strip() if value else None
+
+
+def main(args=None):
+    return m(material_direction=get_material_direction_arg(args))
+
+
 if __name__ == "__main__":
-    m()
-    # if not OUT_FILE_RES:
-    #     m()
-def main(args):
-    m()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="按材质方向批量生成亚马逊上架数据")
+    parser.add_argument(
+        "--material-direction",
+        help="精确筛选材质方向；不传时处理全部材质",
+    )
+    main(parser.parse_args())
     # if not OUT_FILE_RES:
     #     m()
