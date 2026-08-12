@@ -30,7 +30,12 @@ FALLBACK_IMAGE_ROOT = Path(r"D:\oss")
 DEFAULT_MISSING_IMAGE_SKCS_PATH = DEFAULT_INPUT_DIR / "缺少图片的SKC.txt"
 RUG_MATERIAL = "印花地毯"
 KITCHEN_MAT_MATERIAL = "仿羊绒厨房垫"
-SUPPORTED_MATERIALS = {RUG_MATERIAL, KITCHEN_MAT_MATERIAL}
+OUTDOOR_MAT_MATERIAL = "三明治户外垫"
+SUPPORTED_MATERIALS = {
+    RUG_MATERIAL,
+    KITCHEN_MAT_MATERIAL,
+    OUTDOOR_MAT_MATERIAL,
+}
 
 IMAGE_COLUMNS = [
     "主图片 URL",
@@ -109,13 +114,13 @@ def pick_named_url(image_df: pd.DataFrame, *keywords: str) -> str:
 
 
 def pick_sample_url(image_df: pd.DataFrame) -> str:
-    """优先按图片类型选择样本图，再兼容 SWATCH/SWITCH 文件名。"""
+    """优先按图片类型选择样本图，再兼容常见样本图文件名。"""
     if "图片类型" in image_df.columns:
         image_types = image_df["图片类型"].map(normalize_text)
         url = first_url(image_df[image_types == "样本图片"])
         if url:
             return url
-    return pick_named_url(image_df, "SWATCH", "SWITCH")
+    return pick_named_url(image_df, "SWATCH", "SWITCH", "SWICH")
 
 
 def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
@@ -146,6 +151,27 @@ def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
             "2X5白底图",
         ),
         "其他图片 URL6": "",
+        "其他图片 URL7": "",
+        "其他图片 URL8": "",
+        "样本图片 URL": pick_sample_url(image_df),
+    }
+
+
+def outdoor_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
+    """按文件名给三明治户外垫匹配固定顺序的图片 URL。"""
+    required_columns = {"文件名", "图片地址"}
+    missing_columns = sorted(required_columns - set(image_df.columns))
+    if missing_columns:
+        raise ValueError(f"图片数据文件缺少字段：{missing_columns}")
+
+    return {
+        "主图片 URL": pick_named_url(image_df, "5X7户外庭院"),
+        "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
+        "其他图片 URL2": pick_named_url(image_df, "3X5户外门口"),
+        "其他图片 URL3": pick_named_url(image_df, "2.5X8户外走廊"),
+        "其他图片 URL4": pick_named_url(image_df, "封面图5X7客厅"),
+        "其他图片 URL5": pick_named_url(image_df, "120X170单椅"),
+        "其他图片 URL6": pick_named_url(image_df, "5X7卧室"),
         "其他图片 URL7": "",
         "其他图片 URL8": "",
         "样本图片 URL": pick_sample_url(image_df),
@@ -333,10 +359,13 @@ def match_rug_images(
 
         if material == RUG_MATERIAL:
             pool = build_image_pool(image_df)
-            kitchen_values = None
+            fixed_values = None
+        elif material == KITCHEN_MAT_MATERIAL:
+            pool = None
+            fixed_values = kitchen_mat_image_values(image_df)
         else:
             pool = None
-            kitchen_values = kitchen_mat_image_values(image_df)
+            fixed_values = outdoor_mat_image_values(image_df)
 
         for row_index in skc_rows.index:
             size = normalize_size(target_df.at[row_index, "size_text"])
@@ -348,7 +377,7 @@ def match_rug_images(
                 row_index,
                 image_values_for_size(size, pool)
                 if material == RUG_MATERIAL
-                else kitchen_values,
+                else fixed_values,
             )
             matched_rows += 1
         processed_skcs.append(skc)

@@ -1,0 +1,21 @@
+# 配置文件（包含敏感凭证）
+config.py
+
+# 本地数据文件
+D:/NAS_download/
+D:/项目文件/AI自动上架/
+gitinfo.txt
+
+# 飞书配置目录
+D:/rpa_tools/
+
+# 临时文件
+*.xlsm
+*.xlsx
+~$*.xlsx
+
+# 上传记录
+*uploaded_files.json
+*_out_path.txt
+*nas_path.txt
+*SKCS.txt

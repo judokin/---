@@ -547,6 +547,7 @@ def process_file(data_path):
             "包装高度": "GA",
             "包装高度单位": "GB",
             "原产国": "GM",
+            "商品厚度字符串数值": "DD",
             "商品厚度单位": "DE",
             "商品宽度单位": "DL",
             "商品是否抗污": "CQ",
@@ -556,15 +557,63 @@ def process_file(data_path):
             "商品长边的长度": "DI",
             "地毯款式类型": "DM",
             "处理时间 (US)": "EX",
+            "处理时间(US)": "EX",
             "您的价格 USD (在亚马逊上出售, US)": "FA",
             "数量 (US)": "EW",
             "最大订单数量": "EB",
             "物流渠道代码 (US)": "EV",
+            "配送模板 (US)": "FP",
             "箱子数量": "GE",
             "适合室内外使用": "DF",
             "零件编号": "BC",
             "商品尺寸": "AZ",
             "颜色": "AY",
+        },
+        ("三明治户外垫", "亚马逊-北蓉-北美（子账号）"): {
+            "pattern": "CZ",
+            "不含税价目表": "FT",
+            "Back Material Type": "DW",
+            "Construction Type": "BC",
+            "Item Shape": "BM",
+            "Pile Height": "CG",
+            "Size": "BB",
+            "Weave Type": "BS",
+            "型号": "P",
+            "Model Name": "Q",
+            "零件编号": "BJ",
+            "包装宽度单位": "IE",
+            "包装重量单位": "II",
+            "包装长度": "IB",
+            "包装长度单位": "IC",
+            "包装高度": "IF",
+            "包装高度单位": "IG",
+            "原产国": "IT",
+            "商品宽度单位": "FB",
+            "商品状况": "FR",
+            "商品短边的宽度": "FA",
+            "商品长度单位": "EZ",
+            "商品长边的长度": "EY",
+            "您的价格 USD (在亚马逊上出售, US)": "GV",
+            "箱子数量": "IL",
+            "商品尺寸": "BB",
+            "颜色": "AZ",
+            "Material 1": "AR",
+            "Material 2": "AS",
+            "Material 3": "AT",
+            "Special Features-1": "AL",
+            "Special Features-2": "AM",
+            "Special Features-3": "AN",
+            "Special Features-4": "AO",
+            "Special Features-5": "AP",
+            "包裹包含 SKU 数量": "N",
+            "包裹宽度": "ID",
+            "包裹重量": "IH",
+            "处理时间 (US, CA)": "GS",
+            "数量 (US, CA)": "GR",
+            "是否防污？": "DV",
+            "物流渠道代码 (US)": "GQ",
+            "物流渠道代码 (US, CA)": "GQ",
+            "配送模板": "HU",
         },
     }
 
@@ -668,13 +717,16 @@ def process_file(data_path):
             row.extend([None] * (fulfillment_col_num - max_col))
         max_col = fulfillment_col_num
     fulfillment_col_idx = fulfillment_col_num - 1  # 0-based index
+    fulfillment_value = (
+        "卖家自配送（默认）"
+        if material_direction in {"仿羊绒厨房垫", "三明治户外垫"}
+        else "Fulfillment by Merchant (Default)"
+    )
     for row_idx in range(rows_count):
-        write_matrix[row_idx][fulfillment_col_idx] = (
-            "Fulfillment by Merchant (Default)"
-        )
+        write_matrix[row_idx][fulfillment_col_idx] = fulfillment_value
     print(
         f"{fulfillment_col_letter} 列（物流渠道代码）已写死为："
-        "Fulfillment by Merchant (Default)"
+        f"{fulfillment_value}"
     )
 
     # 一次性写入整块区域

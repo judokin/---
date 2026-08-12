@@ -127,8 +127,8 @@ if hasattr(sys.stdout, 'reconfigure'):
 OUT_FILE_RES = False
 # True：测试模式，只生成本地 Excel，不新增或更新飞书子表。
 # False：正式模式，生成 Excel，同时新增并更新飞书子表。
-TEST_MODE = False
 TEST_MODE = True
+TEST_MODE = False
 # 指定文件路径
 config_file_path = Path(__file__).parent / "config.py"
 
@@ -550,7 +550,7 @@ def get_table_data(material_direction=None):
                     glv['材质方向'] + '-Pattern',
                     glv['材质方向'] + '-Design'
                 )
-            if glv['材质方向'] in ['印花地毯']:
+            if glv['材质方向'] in ['三明治户外垫']:
                 for point_key in  ['商品特性1', '商品特性2', '商品特性3', '商品特性4', '商品特性5']:
                     point_key = glv['材质方向'] + '-' + point_key
                     #print(point_key, '文案:', my_list['fields'][point_key][0]['text'])
