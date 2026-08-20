@@ -1,11 +1,12 @@
-r"""按 SKC、材质方向和尺寸，把印花地毯图片 URL 匹配到上架数据 Excel。
+r"""从 PostgreSQL 读取图片，按 SKC、材质方向和尺寸匹配上架图片 URL。
 
 默认测试文件：
     D:\项目文件\AI自动上架\
     output_feishu_table_data_亚马逊--冬豚--北美（子账号）_AR1002-NEW.xlsx
 
-图片数据文件约定：
-    D:\NAS_download\{SKC}\{SKC}data.xlsx
+图片数据来源：
+    PostgreSQL public.ods_fbm_image_upload
+    数据库连接配置默认读取脚本同目录的 pg.config。
 
 默认另存为“原文件名_尺寸图片已匹配.xlsx”；传入 --in-place 可覆盖源文件。
 """
@@ -15,8 +16,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import unquote, urlsplit
 
 import pandas as pd
+import psycopg2
 
 
 DEFAULT_INPUT_PATH = Path(
@@ -25,8 +28,7 @@ DEFAULT_INPUT_PATH = Path(
 DEFAULT_INPUT_DIR = DEFAULT_INPUT_PATH.parent
 DEFAULT_INPUT_PATTERN = "output_feishu_table_data_*.xlsx"
 MATCHED_FILE_SUFFIX = "_尺寸图片已匹配"
-DEFAULT_IMAGE_ROOT = Path(r"D:\NAS_download")
-FALLBACK_IMAGE_ROOT = Path(r"D:\oss")
+DEFAULT_PG_CONFIG_PATH = Path(__file__).resolve().parent / "pg.config"
 DEFAULT_MISSING_IMAGE_SKCS_PATH = DEFAULT_INPUT_DIR / "缺少图片的SKC.txt"
 DEFAULT_MISSING_IMAGE_DETAILS_PATH = Path(__file__).resolve().parent / "缺图明细.txt"
 RUG_MATERIAL = "印花地毯"
@@ -211,16 +213,119 @@ def assign_urls(
             target_df.at[row_index, column] = value
 
 
-def find_image_data_path(image_root: Path, skc: str) -> tuple[Path | None, list[Path]]:
-    """优先读取 NAS 图片表，找不到时回退到 D:\\oss\\<SKC>.xlsx。"""
-    candidates = [
-        image_root / skc / f"{skc}data.xlsx",
-        FALLBACK_IMAGE_ROOT / f"{skc}.xlsx",
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate, candidates
-    return None, candidates
+def load_pg_config(config_path: Path) -> dict[str, object]:
+    """读取 pg.config，兼容中文配置名和常见 PostgreSQL 配置名。"""
+    if not config_path.is_file():
+        raise FileNotFoundError(f"PostgreSQL 配置文件不存在：{config_path}")
+
+    key_aliases = {
+        "连接地址": "host",
+        "地址": "host",
+        "主机": "host",
+        "host": "host",
+        "端口": "port",
+        "port": "port",
+        "数据库": "dbname",
+        "数据库名": "dbname",
+        "database": "dbname",
+        "dbname": "dbname",
+        "账号": "user",
+        "用户名": "user",
+        "user": "user",
+        "密码": "password",
+        "password": "password",
+    }
+    config: dict[str, object] = {}
+    for raw_line in config_path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";", "[")):
+            continue
+        separator = "：" if "：" in line else "=" if "=" in line else ":"
+        if separator not in line:
+            continue
+        raw_key, raw_value = line.split(separator, 1)
+        key = key_aliases.get(raw_key.strip().lower())
+        if key:
+            config[key] = raw_value.strip()
+
+    required_keys = {"host", "port", "dbname", "user", "password"}
+    missing_keys = sorted(required_keys - set(config))
+    if missing_keys:
+        raise ValueError(
+            f"PostgreSQL 配置文件缺少字段：{missing_keys}，文件：{config_path}"
+        )
+    config["port"] = int(config["port"])
+    config["connect_timeout"] = 10
+    return config
+
+
+def decoded_image_name(url: object, fallback_name: object) -> str:
+    """优先从 URL 路径还原中文文件名，规避数据库文件名乱码。"""
+    normalized_url = normalize_text(url)
+    if normalized_url:
+        decoded_path = unquote(urlsplit(normalized_url).path)
+        decoded_name = Path(decoded_path).name
+        if decoded_name:
+            return decoded_name
+    return normalize_text(fallback_name)
+
+
+def infer_image_type(file_name: str, raw_image_type: object) -> str:
+    """从解码后的文件名恢复图片类型，数据库原字段正常时作为回退。"""
+    normalized_name = file_name.upper()
+    if any(keyword in normalized_name for keyword in ("SWATCH", "SWITCH", "SWICH")):
+        return "样本图片"
+    if "白底图" in file_name:
+        return "白底图"
+    if "封面图" in file_name or "8X10客厅" in normalized_name:
+        return "主图片"
+
+    normalized_type = normalize_text(raw_image_type)
+    if normalized_type in {"主图片", "其他图片", "白底图", "样本图片"}:
+        return normalized_type
+    return "其他图片"
+
+
+def load_image_data_from_pg(
+    skcs: list[str],
+    config_path: Path,
+) -> dict[str, pd.DataFrame]:
+    """一次查询所有目标 SKC，并转换成现有图片匹配规则所需的字段。"""
+    if not skcs:
+        return {}
+
+    query = """
+        SELECT skc, file_name, url, size_label, image_type
+        FROM public.ods_fbm_image_upload
+        WHERE skc = ANY(%s)
+          AND status = 'success'
+          AND COALESCE(url, '') <> ''
+          AND (url_expire_at IS NULL OR url_expire_at > NOW())
+        ORDER BY skc, id
+    """
+    with psycopg2.connect(**load_pg_config(config_path)) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, (skcs,))
+            rows = cursor.fetchall()
+
+    records = []
+    for skc, file_name, url, size_label, image_type in rows:
+        restored_name = decoded_image_name(url, file_name)
+        records.append({
+            "SKC": normalize_text(skc),
+            "文件名": restored_name,
+            "图片地址": normalize_text(url),
+            "尺寸": normalize_size(size_label),
+            "图片类型": infer_image_type(restored_name, image_type),
+        })
+
+    if not records:
+        return {}
+    image_df = pd.DataFrame(records)
+    return {
+        skc: group.reset_index(drop=True)
+        for skc, group in image_df.groupby("SKC", sort=False)
+    }
 
 
 def build_image_pool(image_df: pd.DataFrame) -> dict[str, object]:
@@ -388,7 +493,7 @@ def image_values_for_size(size: str, pool: dict[str, object]) -> dict[str, str]:
 def match_rug_images(
     input_path: Path,
     output_path: Path,
-    image_root: Path = DEFAULT_IMAGE_ROOT,
+    pg_config_path: Path = DEFAULT_PG_CONFIG_PATH,
 ) -> dict[str, object]:
     """读取目标 Excel，并按材质方向给 SKC 匹配图片。"""
     if not input_path.is_file():
@@ -415,6 +520,7 @@ def match_rug_images(
     matched_rows = 0
 
     skcs = list(dict.fromkeys(value for value in target_df["SKC"] if value))
+    image_data_by_skc = load_image_data_from_pg(skcs, pg_config_path)
     for skc in skcs:
         skc_rows = target_df[target_df["SKC"] == skc]
         materials = list(dict.fromkeys(
@@ -427,8 +533,8 @@ def match_rug_images(
             continue
         material = materials[0]
 
-        image_data_path, checked_paths = find_image_data_path(image_root, skc)
-        if image_data_path is None:
+        image_df = image_data_by_skc.get(skc)
+        if image_df is None or image_df.empty:
             missing_image_skcs.append(skc)
             for row_index in skc_rows.index:
                 size = normalize_size(target_df.at[row_index, "size_text"])
@@ -437,24 +543,8 @@ def match_rug_images(
                         collect_missing_images(skc, material, size, {})
                     )
             skipped_skcs[skc] = (
-                "图片数据文件不存在，已检查："
-                + "；".join(str(path) for path in checked_paths)
+                "数据库 public.ods_fbm_image_upload 中没有可用图片记录"
             )
-            continue
-
-        image_df = pd.read_excel(image_data_path)
-        if "SKC" in image_df.columns:
-            image_df = image_df[
-                image_df["SKC"].map(normalize_text) == skc
-            ].copy()
-        if image_df.empty:
-            for row_index in skc_rows.index:
-                size = normalize_size(target_df.at[row_index, "size_text"])
-                if size:
-                    missing_image_details.extend(
-                        collect_missing_images(skc, material, size, {})
-                    )
-            skipped_skcs[skc] = "图片数据文件中没有该 SKC 的记录"
             continue
 
         if material == RUG_MATERIAL:
@@ -498,7 +588,7 @@ def match_rug_images(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="按 SKC 和尺寸给印花地毯上架数据匹配图片 URL"
+        description="从 PostgreSQL 按 SKC、材质方向和尺寸匹配图片 URL"
     )
     parser.add_argument(
         "input_path",
@@ -510,10 +600,10 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--image-root",
+        "--pg-config",
         type=Path,
-        default=DEFAULT_IMAGE_ROOT,
-        help="SKC 图片数据根目录",
+        default=DEFAULT_PG_CONFIG_PATH,
+        help="PostgreSQL 配置文件路径，默认使用脚本同目录的 pg.config",
     )
     parser.add_argument(
         "--output",
@@ -532,7 +622,7 @@ def parse_args() -> argparse.Namespace:
         "--missing-image-output",
         type=Path,
         default=DEFAULT_MISSING_IMAGE_SKCS_PATH,
-        help="缺少图片数据文件的 SKC 文本清单路径",
+        help="数据库中没有可用图片记录的 SKC 文本清单路径",
     )
     parser.add_argument(
         "--missing-image-details-output",
@@ -609,7 +699,7 @@ def main() -> None:
             output_path = default_output_path(input_path)
 
         try:
-            result = match_rug_images(input_path, output_path, args.image_root)
+            result = match_rug_images(input_path, output_path, args.pg_config)
         except Exception as exc:
             failed_files.append((input_path, str(exc)))
             print(f"处理失败，继续下一文件：{input_path.name}，原因：{exc}")
@@ -626,7 +716,7 @@ def main() -> None:
         encoding="utf-8",
     )
     print(
-        f"缺少图片数据文件的 SKC：{len(unique_missing_image_skcs)} 个，"
+        f"数据库中没有可用图片记录的 SKC：{len(unique_missing_image_skcs)} 个，"
         f"清单已保存至：{args.missing_image_output}"
     )
 

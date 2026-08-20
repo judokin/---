@@ -279,7 +279,11 @@ def reset_fields_batch_update(data, str1, str2):
 
     print(response.status_code)
     print(response.json())
-def get_all_table_data(str1 = 'Jolyb8QBoaPzj6swf0cc6bqenlf', str2 = 'tbl8zJByKrMGUJvM'):
+def get_all_table_data(
+    str1='Jolyb8QBoaPzj6swf0cc6bqenlf',
+    str2='tbl8zJByKrMGUJvM',
+    material_direction=None,
+):
     import datetime
     # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tbl8zJByKrMGUJvM&view=vew4LsxOAs
     url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{str1}/tables/{str2}/records/search?page_size=500"
@@ -293,12 +297,36 @@ def get_all_table_data(str1 = 'Jolyb8QBoaPzj6swf0cc6bqenlf', str2 = 'tbl8zJByKrM
     items_list = []
     for i in range(100):
         data = {}
+        if material_direction:
+            data = {
+                "filter": {
+                    "conjunction": "and",
+                    "conditions": [{
+                        "field_name": "材质方向",
+                        "operator": "is",
+                        "value": [material_direction],
+                    }],
+                }
+            }
         request_url = url + "&page_token=" + page_token if page_token else url
         data_json = {}
-        for attempt in range(3):
-            response = requests.post(
-                request_url, headers=headers, json=data, timeout=30
-            )
+        last_failure = "未知错误"
+        for attempt in range(5):
+            try:
+                response = requests.post(
+                    request_url, headers=headers, json=data, timeout=30
+                )
+            except requests.exceptions.RequestException as exc:
+                last_failure = f"网络异常：{type(exc).__name__}: {exc}"
+                if attempt < 4:
+                    wait_seconds = 2 ** attempt
+                    print(
+                        f"飞书查询网络异常，第 {attempt + 1} 次失败，"
+                        f"{wait_seconds} 秒后重试同一页：{exc}"
+                    )
+                    time.sleep(wait_seconds)
+                continue
+
             print("Status Code1:", response.status_code)
             try:
                 data_json = response.json()
@@ -310,18 +338,21 @@ def get_all_table_data(str1 = 'Jolyb8QBoaPzj6swf0cc6bqenlf', str2 = 'tbl8zJByKrM
                 and isinstance(data_json['data'].get('items'), list)
             ):
                 break
-            if attempt < 2:
+            last_failure = (
+                f"HTTP {response.status_code}，"
+                f"code={data_json.get('code')}，msg={data_json.get('msg')}"
+            )
+            if attempt < 4:
+                wait_seconds = 2 ** attempt
                 print(
                     f"飞书查询失败，第 {attempt + 1} 次重试："
-                    f"HTTP {response.status_code}，"
-                    f"code={data_json.get('code')}，msg={data_json.get('msg')}"
+                    f"{last_failure}，{wait_seconds} 秒后重试同一页"
                 )
-                time.sleep(attempt + 1)
+                time.sleep(wait_seconds)
         else:
             raise RuntimeError(
                 f"飞书表格查询失败：app={str1}，table={str2}，"
-                f"HTTP {response.status_code}，"
-                f"code={data_json.get('code')}，msg={data_json.get('msg')}"
+                f"page_token={page_token or '<第一页>'}，{last_failure}"
             )
         #datas = []
         for i, items in enumerate(data_json['data']['items']):
@@ -458,6 +489,11 @@ def get_table_data(material_direction=None):
         conditions = [
             {
                 "field_name": "父体SKU",
+                "operator": "isNotEmpty",
+                "value": []
+            },
+            {
+                "field_name": "图所在NAS盘地址",
                 "operator": "isNotEmpty",
                 "value": []
             },
@@ -855,13 +891,17 @@ def _generate_single_shop(
     test_mode,
     target_pskc=None,
     preloaded_skc_datas=None,
+    material_direction=None,
 ):
+    material_direction = str(material_direction or '').strip()
+    if not material_direction:
+        raise ValueError("材质方向不能为空")
     dir_path = r"D:\项目文件\AI自动上架\\"
     nas_dir_path = r"D:\NAS_download\\"
     skc_datas = copy.deepcopy(
         preloaded_skc_datas
         if preloaded_skc_datas is not None
-        else get_table_data()
+        else get_table_data(material_direction=material_direction)
     )
     gd_dict = {}
     # guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblTer6BHOZRAQkB')
@@ -898,7 +938,11 @@ def _generate_single_shop(
     # trim_text(text, words_list[0]['fields']['违禁词列表'][0]['text'].split(","))
     print(words_list)
     # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tbl8zJByKrMGUJvM&view=vew4LsxOAs
-    chrildren_list = get_all_table_data('Jolyb8QBoaPzj6swf0cc6bqenlf', 'tbl8zJByKrMGUJvM')
+    chrildren_list = get_all_table_data(
+        'Jolyb8QBoaPzj6swf0cc6bqenlf',
+        'tbl8zJByKrMGUJvM',
+        material_direction=material_direction,
+    )
     # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblZOU82tgaLNhAx&view=vewek5eTd0
     parent_list = get_all_table_data('Jolyb8QBoaPzj6swf0cc6bqenlf', 'tblZOU82tgaLNhAx')
     # 循环 skc_datas，获取每个SKC对应的标题、文案等信息
@@ -1076,7 +1120,9 @@ def _generate_single_shop(
         if add_data['records']:
             add_fields(add_data)
         chrildren_list = get_all_table_data(
-            'Jolyb8QBoaPzj6swf0cc6bqenlf', 'tbl8zJByKrMGUJvM'
+            'Jolyb8QBoaPzj6swf0cc6bqenlf',
+            'tbl8zJByKrMGUJvM',
+            material_direction=material_direction,
         )
     # import pdb;pdb.set_trace()
     COLOR_DICT = {}
@@ -1520,6 +1566,11 @@ def m(test_mode=None, material_direction=None):
     if test_mode is None:
         test_mode = TEST_MODE
     material_direction = str(material_direction or '').strip()
+    if not material_direction:
+        raise ValueError(
+            "必须指定材质方向；命令行请使用 "
+            "--material-direction \"材质方向\""
+        )
 
     skcs_path = r"D:\NAS_download\SKCS.txt"
     if not os.path.isfile(skcs_path):
@@ -1580,6 +1631,7 @@ def m(test_mode=None, material_direction=None):
                         test_mode,
                         target_pskc=parent_sku,
                         preloaded_skc_datas=shop_skc_datas,
+                        material_direction=material_direction,
                     )
                 except Exception as exc:
                     failed_batches.append((shop_name, parent_sku, str(exc)))
@@ -1630,7 +1682,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="按材质方向批量生成亚马逊上架数据")
     parser.add_argument(
         "--material-direction",
-        help="精确筛选材质方向；不传时处理全部材质",
+        required=True,
+        help="必须指定要精确筛选的材质方向",
     )
     main(parser.parse_args())
     # if not OUT_FILE_RES:
