@@ -14,9 +14,12 @@ r"""从 PostgreSQL 读取图片，按 SKC、材质方向和尺寸匹配上架图
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Iterable
+from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlsplit
+from urllib.request import Request, urlopen
 
 import pandas as pd
 import psycopg2
@@ -31,6 +34,10 @@ MATCHED_FILE_SUFFIX = "_尺寸图片已匹配"
 DEFAULT_PG_CONFIG_PATH = Path(__file__).resolve().parent / "pg.config"
 DEFAULT_MISSING_IMAGE_SKCS_PATH = DEFAULT_INPUT_DIR / "缺少图片的SKC.txt"
 DEFAULT_MISSING_IMAGE_DETAILS_PATH = Path(__file__).resolve().parent / "缺图明细.txt"
+FEISHU_MISSING_IMAGE_WEBHOOK = (
+    "https://open.feishu.cn/open-apis/bot/v2/hook/"
+    "53eda273-cc3d-4092-bfb8-01d6d5122aa5"
+)
 RUG_MATERIAL = "印花地毯"
 KITCHEN_MAT_MATERIAL = "仿羊绒厨房垫"
 OUTDOOR_MAT_MATERIAL = "三明治户外垫"
@@ -62,18 +69,6 @@ KITCHEN_MAT_IMAGE_NAMES = {
     "其他图片 URL5": "2X5尺寸白底图 / 白底图2X5 / 2X5白底图",
     "样本图片 URL": "样本图片 / SWATCH / SWITCH / SWICH",
 }
-
-OUTDOOR_MAT_IMAGE_NAMES = {
-    "主图片 URL": "5X7户外庭院",
-    "其他图片 URL1": "白底图5X7",
-    "其他图片 URL2": "3X5户外门口",
-    "其他图片 URL3": "2.5X8户外走廊",
-    "其他图片 URL4": "封面图5X7客厅",
-    "其他图片 URL5": "120X170单椅",
-    "其他图片 URL6": "5X7卧室",
-    "样本图片 URL": "样本图片 / SWATCH / SWITCH / SWICH",
-}
-
 
 def normalize_text(value: object) -> str:
     """把 Excel 值转换为去除首尾空格的字符串。"""
@@ -181,25 +176,95 @@ def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
     }
 
 
-def outdoor_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
-    """按文件名给三明治户外垫匹配固定顺序的图片 URL。"""
+def outdoor_mat_required_image_names(size: str) -> dict[str, str]:
+    """返回三明治户外垫指定尺寸各图片列期望的图片名称。"""
+    normalized_size = normalize_size(size)
+    sample_name = "样本图片 / SWATCH / SWITCH / SWICH"
+    if normalized_size == "2.5X8":
+        return {
+            "主图片 URL": "2.5X8户外走廊",
+            "其他图片 URL1": "白底图2X5",
+            "其他图片 URL2": "5X7户外庭院",
+            "其他图片 URL3": "3X5户外门口",
+            "其他图片 URL4": "封面图2X5厨房 / 2X5厨房",
+            "其他图片 URL5": "2X5走廊",
+            "样本图片 URL": sample_name,
+        }
+    if normalized_size == "3X5":
+        return {
+            "主图片 URL": "3X5户外门口",
+            "其他图片 URL1": "白底图120X170",
+            "其他图片 URL2": "5X7户外庭院",
+            "其他图片 URL3": "2.5X8户外走廊",
+            "其他图片 URL4": "120X170单椅",
+            "其他图片 URL5": "封面图5X7客厅 / 5X7客厅",
+            "其他图片 URL6": "5X7卧室",
+            "样本图片 URL": sample_name,
+        }
+    return {
+        "主图片 URL": "5X7户外庭院",
+        "其他图片 URL1": "白底图5X7",
+        "其他图片 URL2": "3X5户外门口",
+        "其他图片 URL3": "2.5X8户外走廊",
+        "其他图片 URL4": "封面图5X7客厅 / 5X7客厅",
+        "其他图片 URL5": "120X170单椅",
+        "其他图片 URL6": "5X7卧室",
+        "样本图片 URL": sample_name,
+    }
+
+
+def outdoor_mat_image_values(
+    image_df: pd.DataFrame,
+    size: str,
+) -> dict[str, str]:
+    """按标准化尺寸给三明治户外垫匹配图片 URL。"""
     required_columns = {"文件名", "图片地址"}
     missing_columns = sorted(required_columns - set(image_df.columns))
     if missing_columns:
         raise ValueError(f"图片数据文件缺少字段：{missing_columns}")
 
-    return {
-        "主图片 URL": pick_named_url(image_df, "5X7户外庭院"),
-        "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
-        "其他图片 URL2": pick_named_url(image_df, "3X5户外门口"),
-        "其他图片 URL3": pick_named_url(image_df, "2.5X8户外走廊"),
-        "其他图片 URL4": pick_named_url(image_df, "封面图5X7客厅"),
-        "其他图片 URL5": pick_named_url(image_df, "120X170单椅"),
-        "其他图片 URL6": pick_named_url(image_df, "5X7卧室"),
+    normalized_size = normalize_size(size)
+    if normalized_size == "2.5X8":
+        values = {
+            "主图片 URL": pick_named_url(image_df, "2.5X8户外走廊"),
+            "其他图片 URL1": pick_named_url(image_df, "白底图2X5"),
+            "其他图片 URL2": pick_named_url(image_df, "5X7户外庭院"),
+            "其他图片 URL3": pick_named_url(image_df, "3X5户外门口"),
+            "其他图片 URL4": pick_named_url(
+                image_df, "封面图2X5厨房", "2X5厨房"
+            ),
+            "其他图片 URL5": pick_named_url(image_df, "2X5走廊"),
+        }
+    elif normalized_size == "3X5":
+        values = {
+            "主图片 URL": pick_named_url(image_df, "3X5户外门口"),
+            "其他图片 URL1": pick_named_url(image_df, "白底图120X170"),
+            "其他图片 URL2": pick_named_url(image_df, "5X7户外庭院"),
+            "其他图片 URL3": pick_named_url(image_df, "2.5X8户外走廊"),
+            "其他图片 URL4": pick_named_url(image_df, "120X170单椅"),
+            "其他图片 URL5": pick_named_url(
+                image_df, "封面图5X7客厅", "5X7客厅"
+            ),
+            "其他图片 URL6": pick_named_url(image_df, "5X7卧室"),
+        }
+    else:
+        values = {
+            "主图片 URL": pick_named_url(image_df, "5X7户外庭院"),
+            "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
+            "其他图片 URL2": pick_named_url(image_df, "3X5户外门口"),
+            "其他图片 URL3": pick_named_url(image_df, "2.5X8户外走廊"),
+            "其他图片 URL4": pick_named_url(
+                image_df, "封面图5X7客厅", "5X7客厅"
+            ),
+            "其他图片 URL5": pick_named_url(image_df, "120X170单椅"),
+            "其他图片 URL6": pick_named_url(image_df, "5X7卧室"),
+        }
+    values.update({
         "其他图片 URL7": "",
         "其他图片 URL8": "",
         "样本图片 URL": pick_sample_url(image_df),
-    }
+    })
+    return values
 
 
 def assign_urls(
@@ -424,7 +489,7 @@ def collect_missing_images(
     if material == KITCHEN_MAT_MATERIAL:
         required_names = KITCHEN_MAT_IMAGE_NAMES
     elif material == OUTDOOR_MAT_MATERIAL:
-        required_names = OUTDOOR_MAT_IMAGE_NAMES
+        required_names = outdoor_mat_required_image_names(size)
     else:
         required_names = required_rug_image_names(size)
 
@@ -555,17 +620,18 @@ def match_rug_images(
             fixed_values = kitchen_mat_image_values(image_df)
         else:
             pool = None
-            fixed_values = outdoor_mat_image_values(image_df)
+            fixed_values = None
 
         for row_index in skc_rows.index:
             size = normalize_size(target_df.at[row_index, "size_text"])
             if not size:
                 continue
-            values = (
-                image_values_for_size(size, pool)
-                if material == RUG_MATERIAL
-                else fixed_values
-            )
+            if material == RUG_MATERIAL:
+                values = image_values_for_size(size, pool)
+            elif material == OUTDOOR_MAT_MATERIAL:
+                values = outdoor_mat_image_values(image_df, size)
+            else:
+                values = fixed_values
             target_df.loc[row_index, IMAGE_COLUMNS] = ""
             assign_urls(target_df, row_index, values)
             missing_image_details.extend(
@@ -667,6 +733,57 @@ def print_result(result: dict[str, object]) -> None:
             print(f"  {skc}: {reason}")
 
 
+def send_feishu_text(webhook: str, content: str) -> None:
+    """通过飞书自定义机器人发送一条文本消息。"""
+    payload = json.dumps(
+        {"msg_type": "text", "content": {"text": content}},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = Request(
+        webhook,
+        data=payload,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            response_data = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"飞书群通知请求失败：{exc}") from exc
+    if response_data.get("code", 0) != 0:
+        raise RuntimeError(f"飞书群通知发送失败：{response_data}")
+
+
+def send_missing_image_notifications(detail_lines: list[str]) -> None:
+    """存在缺图时，将明细按消息长度分段发送到飞书群。"""
+    if not detail_lines:
+        return
+
+    header = "【亚马逊批量上架缺图提醒】\n"
+    max_content_length = 3500
+    message_parts: list[str] = []
+    current_lines: list[str] = []
+    current_length = len(header)
+    for line in detail_lines:
+        line_length = len(line) + 1
+        if current_lines and current_length + line_length > max_content_length:
+            message_parts.append("\n".join(current_lines))
+            current_lines = []
+            current_length = len(header)
+        current_lines.append(line)
+        current_length += line_length
+    if current_lines:
+        message_parts.append("\n".join(current_lines))
+
+    total = len(message_parts)
+    for index, message_part in enumerate(message_parts, start=1):
+        page_text = f"（{index}/{total}）\n" if total > 1 else ""
+        send_feishu_text(
+            FEISHU_MISSING_IMAGE_WEBHOOK,
+            f"{header}{page_text}{message_part}",
+        )
+
+
 def main() -> None:
     args = parse_args()
     if args.in_place and args.output:
@@ -753,6 +870,13 @@ def main() -> None:
         f"缺图明细：{len(unique_missing_image_details)} 项，"
         f"报告已保存至：{args.missing_image_details_output}"
     )
+    if unique_missing_image_details:
+        try:
+            send_missing_image_notifications(detail_lines)
+        except RuntimeError as exc:
+            print(f"缺图明细发送群通知失败：{exc}")
+        else:
+            print("缺图明细已发送到飞书群")
 
     print(
         f"\n批量处理完成：成功 {len(succeeded_files)} 个，"
