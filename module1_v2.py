@@ -711,11 +711,18 @@ def get_table_data(material_direction=None):
                         '9X12',
                     ]
                     for s_txt in title_size_list:
-                        if glv['材质方向'] + '-商品名称' + s_txt not in parent_item_text_info['fields']:
+                        title_field = glv['材质方向'] + f'-商品名称{s_txt}'
+                        highlight_field = glv['材质方向'] + f'-Item Highlight {s_txt}'
+                        if title_field not in parent_item_text_info['fields']:
                             items['fields'][f'{s_txt}的标题'] = ''
                         else:
-                            items['fields'][f'{s_txt}的标题'] = parent_item_text_info['fields'][glv['材质方向'] + f'-商品名称{s_txt}']
+                            items['fields'][f'{s_txt}的标题'] = parent_item_text_info['fields'][title_field]
+                        items['fields'][f'{s_txt}的副标题'] = get_feishu_field_text(
+                            parent_item_text_info['fields'],
+                            highlight_field,
+                        )
                         print(f"商品名称{s_txt}:", items['fields'][f'{s_txt}的标题'])
+                        print(f"Item Highlight {s_txt}:", items['fields'][f'{s_txt}的副标题'])
                 
                 if '北美FBM' not in items['fields']['是否FBM测款'] and 'Amazon-US-FBM' not in items['fields']['是否FBM测款']:
                     print('continue004')
