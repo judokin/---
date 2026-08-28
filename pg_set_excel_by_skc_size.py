@@ -47,6 +47,13 @@ SUPPORTED_MATERIALS = {
     OUTDOOR_MAT_MATERIAL,
 }
 
+# 仅凭 SKC 检查图片时使用的标准产品尺寸。Excel 匹配模式仍以 size_text 为准。
+DEFAULT_IMAGE_CHECK_SIZES = {
+    RUG_MATERIAL: ("2X3", "2X5", "5X7", "8X10"),
+    KITCHEN_MAT_MATERIAL: ("固定图片顺序",),
+    OUTDOOR_MAT_MATERIAL: ("2.5X8", "3X5", "5X7", "6X9", "8X10", "9X12"),
+}
+
 IMAGE_COLUMNS = [
     "主图片 URL",
     "其他图片 URL1",
@@ -62,12 +69,14 @@ IMAGE_COLUMNS = [
 
 KITCHEN_MAT_IMAGE_NAMES = {
     "主图片 URL": "20X32+20X48厨房垫",
-    "其他图片 URL1": "封面图2X5厨房 / 2X5厨房",
+    "其他图片 URL1": (
+        "封面图2X5厨房 / 2X5厨房 / 2X6厨房 / 封面图2X6厨房（四选一）"
+    ),
     "其他图片 URL2": "封面图2X3门口 / 2X3门口",
     "其他图片 URL3": "2X5走廊",
     "其他图片 URL4": "120X170单椅",
     "其他图片 URL5": "2X5尺寸白底图 / 白底图2X5 / 2X5白底图",
-    "样本图片 URL": "样本图片 / SWATCH / SWITCH / SWICH",
+    "样本图片 URL": "样本图片 / SWATCH / SWACH / SWITCH / SWICH",
 }
 
 def normalize_text(value: object) -> str:
@@ -139,7 +148,7 @@ def pick_sample_url(image_df: pd.DataFrame) -> str:
         url = first_url(image_df[image_types == "样本图片"])
         if url:
             return url
-    return pick_named_url(image_df, "SWATCH", "SWITCH", "SWICH")
+    return pick_named_url(image_df, "SWATCH", "SWACH", "SWITCH", "SWICH")
 
 
 def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
@@ -155,6 +164,8 @@ def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
             image_df,
             "封面图2X5厨房",
             "2X5厨房",
+            "2X6厨房",
+            "封面图2X6厨房",
         ),
         "其他图片 URL2": pick_named_url(
             image_df,
@@ -179,36 +190,54 @@ def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
 def outdoor_mat_required_image_names(size: str) -> dict[str, str]:
     """返回三明治户外垫指定尺寸各图片列期望的图片名称。"""
     normalized_size = normalize_size(size)
-    sample_name = "样本图片 / SWATCH / SWITCH / SWICH"
+    sample_name = "样本图片 / SWATCH / SWACH / SWITCH / SWICH"
     if normalized_size == "2.5X8":
         return {
             "主图片 URL": "2.5X8户外走廊",
             "其他图片 URL1": "白底图2X5",
-            "其他图片 URL2": "5X7户外庭院",
-            "其他图片 URL3": "3X5户外门口",
-            "其他图片 URL4": "封面图2X5厨房 / 2X5厨房",
-            "其他图片 URL5": "2X5走廊",
+            "其他图片 URL2": "8X10户外庭院",
+            "其他图片 URL3": "5X7户外庭院",
+            "其他图片 URL4": "3X5户外门口",
+            "其他图片 URL5": (
+                "封面图2X5厨房 / 2X5厨房 / 2X6厨房 / "
+                "封面图2X6厨房（四选一）"
+            ),
+            "其他图片 URL6": "2X5走廊",
             "样本图片 URL": sample_name,
         }
     if normalized_size == "3X5":
         return {
             "主图片 URL": "3X5户外门口",
             "其他图片 URL1": "白底图120X170",
+            "其他图片 URL2": "8X10户外庭院",
+            "其他图片 URL3": "5X7户外庭院",
+            "其他图片 URL4": "2.5X8户外走廊",
+            "其他图片 URL5": "120X170单椅",
+            "其他图片 URL6": "封面图5X7客厅 / 5X7客厅",
+            "其他图片 URL7": "5X7卧室",
+            "样本图片 URL": sample_name,
+        }
+    if normalized_size in {"8X10", "9X12"}:
+        return {
+            "主图片 URL": "8X10户外庭院",
+            "其他图片 URL1": "白底图5X7",
             "其他图片 URL2": "5X7户外庭院",
-            "其他图片 URL3": "2.5X8户外走廊",
-            "其他图片 URL4": "120X170单椅",
+            "其他图片 URL3": "3X5户外门口",
+            "其他图片 URL4": "2.5X8户外走廊",
             "其他图片 URL5": "封面图5X7客厅 / 5X7客厅",
-            "其他图片 URL6": "5X7卧室",
+            "其他图片 URL6": "120X170单椅",
+            "其他图片 URL7": "5X7卧室",
             "样本图片 URL": sample_name,
         }
     return {
         "主图片 URL": "5X7户外庭院",
         "其他图片 URL1": "白底图5X7",
-        "其他图片 URL2": "3X5户外门口",
-        "其他图片 URL3": "2.5X8户外走廊",
-        "其他图片 URL4": "封面图5X7客厅 / 5X7客厅",
-        "其他图片 URL5": "120X170单椅",
-        "其他图片 URL6": "5X7卧室",
+        "其他图片 URL2": "8X10户外庭院",
+        "其他图片 URL3": "3X5户外门口",
+        "其他图片 URL4": "2.5X8户外走廊",
+        "其他图片 URL5": "封面图5X7客厅 / 5X7客厅",
+        "其他图片 URL6": "120X170单椅",
+        "其他图片 URL7": "5X7卧室",
         "样本图片 URL": sample_name,
     }
 
@@ -228,42 +257,60 @@ def outdoor_mat_image_values(
         values = {
             "主图片 URL": pick_named_url(image_df, "2.5X8户外走廊"),
             "其他图片 URL1": pick_named_url(image_df, "白底图2X5"),
-            "其他图片 URL2": pick_named_url(image_df, "5X7户外庭院"),
-            "其他图片 URL3": pick_named_url(image_df, "3X5户外门口"),
-            "其他图片 URL4": pick_named_url(
-                image_df, "封面图2X5厨房", "2X5厨房"
+            "其他图片 URL2": pick_named_url(image_df, "8X10户外庭院"),
+            "其他图片 URL3": pick_named_url(image_df, "5X7户外庭院"),
+            "其他图片 URL4": pick_named_url(image_df, "3X5户外门口"),
+            "其他图片 URL5": pick_named_url(
+                image_df,
+                "封面图2X5厨房",
+                "2X5厨房",
+                "2X6厨房",
+                "封面图2X6厨房",
             ),
-            "其他图片 URL5": pick_named_url(image_df, "2X5走廊"),
+            "其他图片 URL6": pick_named_url(image_df, "2X5走廊"),
         }
     elif normalized_size == "3X5":
         values = {
             "主图片 URL": pick_named_url(image_df, "3X5户外门口"),
             "其他图片 URL1": pick_named_url(image_df, "白底图120X170"),
+            "其他图片 URL2": pick_named_url(image_df, "8X10户外庭院"),
+            "其他图片 URL3": pick_named_url(image_df, "5X7户外庭院"),
+            "其他图片 URL4": pick_named_url(image_df, "2.5X8户外走廊"),
+            "其他图片 URL5": pick_named_url(image_df, "120X170单椅"),
+            "其他图片 URL6": pick_named_url(
+                image_df, "封面图5X7客厅", "5X7客厅"
+            ),
+            "其他图片 URL7": pick_named_url(image_df, "5X7卧室"),
+        }
+    elif normalized_size in {"8X10", "9X12"}:
+        values = {
+            "主图片 URL": pick_named_url(image_df, "8X10户外庭院"),
+            "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
             "其他图片 URL2": pick_named_url(image_df, "5X7户外庭院"),
-            "其他图片 URL3": pick_named_url(image_df, "2.5X8户外走廊"),
-            "其他图片 URL4": pick_named_url(image_df, "120X170单椅"),
+            "其他图片 URL3": pick_named_url(image_df, "3X5户外门口"),
+            "其他图片 URL4": pick_named_url(image_df, "2.5X8户外走廊"),
             "其他图片 URL5": pick_named_url(
                 image_df, "封面图5X7客厅", "5X7客厅"
             ),
-            "其他图片 URL6": pick_named_url(image_df, "5X7卧室"),
+            "其他图片 URL6": pick_named_url(image_df, "120X170单椅"),
+            "其他图片 URL7": pick_named_url(image_df, "5X7卧室"),
         }
     else:
         values = {
             "主图片 URL": pick_named_url(image_df, "5X7户外庭院"),
             "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
-            "其他图片 URL2": pick_named_url(image_df, "3X5户外门口"),
-            "其他图片 URL3": pick_named_url(image_df, "2.5X8户外走廊"),
-            "其他图片 URL4": pick_named_url(
+            "其他图片 URL2": pick_named_url(image_df, "8X10户外庭院"),
+            "其他图片 URL3": pick_named_url(image_df, "3X5户外门口"),
+            "其他图片 URL4": pick_named_url(image_df, "2.5X8户外走廊"),
+            "其他图片 URL5": pick_named_url(
                 image_df, "封面图5X7客厅", "5X7客厅"
             ),
-            "其他图片 URL5": pick_named_url(image_df, "120X170单椅"),
-            "其他图片 URL6": pick_named_url(image_df, "5X7卧室"),
+            "其他图片 URL6": pick_named_url(image_df, "120X170单椅"),
+            "其他图片 URL7": pick_named_url(image_df, "5X7卧室"),
         }
-    values.update({
-        "其他图片 URL7": "",
-        "其他图片 URL8": "",
-        "样本图片 URL": pick_sample_url(image_df),
-    })
+    values.setdefault("其他图片 URL7", "")
+    values["其他图片 URL8"] = ""
+    values["样本图片 URL"] = pick_sample_url(image_df)
     return values
 
 
@@ -338,7 +385,10 @@ def decoded_image_name(url: object, fallback_name: object) -> str:
 def infer_image_type(file_name: str, raw_image_type: object) -> str:
     """从解码后的文件名恢复图片类型，数据库原字段正常时作为回退。"""
     normalized_name = file_name.upper()
-    if any(keyword in normalized_name for keyword in ("SWATCH", "SWITCH", "SWICH")):
+    if any(
+        keyword in normalized_name
+        for keyword in ("SWATCH", "SWACH", "SWITCH", "SWICH")
+    ):
         return "样本图片"
     if "白底图" in file_name:
         return "白底图"
@@ -652,6 +702,106 @@ def match_rug_images(
     }
 
 
+def check_skc_image_completeness(
+    skcs: Iterable[str],
+    material: str,
+    pg_config_path: Path = DEFAULT_PG_CONFIG_PATH,
+    sizes: Iterable[str] | None = None,
+) -> dict[str, object]:
+    """不生成 Excel，直接检查一批 SKC 是否具备材质所需图片。"""
+    material = normalize_text(material)
+    if material not in SUPPORTED_MATERIALS:
+        raise ValueError(f"不支持的材质方向：{material or '<空>'}")
+
+    normalized_skcs = list(dict.fromkeys(
+        skc for skc in (normalize_text(value) for value in skcs) if skc
+    ))
+    check_sizes = list(dict.fromkeys(
+        size
+        for size in (
+            normalize_size(value)
+            for value in (sizes or DEFAULT_IMAGE_CHECK_SIZES[material])
+        )
+        if size
+    ))
+    if not check_sizes:
+        raise ValueError("图片完整性检查尺寸不能为空")
+
+    image_data_by_skc = load_image_data_from_pg(normalized_skcs, pg_config_path)
+    missing_image_skcs: list[str] = []
+    missing_image_details: list[dict[str, str]] = []
+
+    for skc in normalized_skcs:
+        image_df = image_data_by_skc.get(skc)
+        if image_df is None or image_df.empty:
+            missing_image_skcs.append(skc)
+            for size in check_sizes:
+                missing_image_details.extend(
+                    collect_missing_images(skc, material, size, {})
+                )
+            continue
+
+        if material == RUG_MATERIAL:
+            pool = build_image_pool(image_df)
+            for size in check_sizes:
+                values = image_values_for_size(size, pool)
+                missing_image_details.extend(
+                    collect_missing_images(skc, material, size, values)
+                )
+        elif material == KITCHEN_MAT_MATERIAL:
+            values = kitchen_mat_image_values(image_df)
+            missing_image_details.extend(
+                collect_missing_images(skc, material, check_sizes[0], values)
+            )
+        else:
+            for size in check_sizes:
+                values = outdoor_mat_image_values(image_df, size)
+                missing_image_details.extend(
+                    collect_missing_images(skc, material, size, values)
+                )
+
+    unique_details = list(dict.fromkeys(
+        (item["skc"], item["required_image"])
+        for item in missing_image_details
+    ))
+    return {
+        "material": material,
+        "checked_skcs": normalized_skcs,
+        "checked_sizes": check_sizes,
+        "missing_image_skcs": list(dict.fromkeys(missing_image_skcs)),
+        "missing_image_details": unique_details,
+    }
+
+
+def save_image_check_reports(
+    result: dict[str, object],
+    missing_skc_path: Path,
+    detail_path: Path,
+) -> list[str]:
+    """保存完整性检查报告，并返回适合群通知的缺图明细文本。"""
+    missing_skcs = list(result["missing_image_skcs"])
+    missing_skc_path.parent.mkdir(parents=True, exist_ok=True)
+    missing_skc_path.write_text(
+        "".join(f"{skc}\n" for skc in missing_skcs),
+        encoding="utf-8-sig",
+    )
+
+    details_by_skc: dict[str, list[str]] = {}
+    for skc, required_image in result["missing_image_details"]:
+        details_by_skc.setdefault(skc, []).append(required_image)
+
+    detail_lines: list[str] = []
+    for skc, required_images in details_by_skc.items():
+        detail_lines.append(f"SKC: {skc}")
+        for required_image in required_images:
+            detail_lines.append(f"  - 缺少图片: {required_image}")
+        detail_lines.append("")
+
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
+    detail_path.write_text("\n".join(detail_lines), encoding="utf-8-sig")
+    return detail_lines
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="从 PostgreSQL 按 SKC、材质方向和尺寸匹配图片 URL"
@@ -695,6 +845,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_MISSING_IMAGE_DETAILS_PATH,
         help="按 SKC 记录缺少的具体图片名称的文本报告路径",
+    )
+    parser.add_argument(
+        "--no-group-notification",
+        "--no-feishu-notification",
+        dest="no_group_notification",
+        action="store_true",
+        help="不把缺图明细发送到飞书群；默认发送",
     )
     return parser.parse_args()
 
@@ -840,26 +997,18 @@ def main() -> None:
     unique_missing_image_details = list(dict.fromkeys(
         (
             item["skc"],
-            item["material"],
-            item["size"],
-            item["target_column"],
             item["required_image"],
         )
         for item in missing_image_details
     ))
-    details_by_skc: dict[str, list[tuple[str, str, str, str]]] = {}
-    for skc, material, size, target_column, required_image in unique_missing_image_details:
-        details_by_skc.setdefault(skc, []).append(
-            (material, size, target_column, required_image)
-        )
+    details_by_skc: dict[str, list[str]] = {}
+    for skc, required_image in unique_missing_image_details:
+        details_by_skc.setdefault(skc, []).append(required_image)
     detail_lines = []
-    for skc, details in details_by_skc.items():
+    for skc, required_images in details_by_skc.items():
         detail_lines.append(f"SKC: {skc}")
-        for material, size, target_column, required_image in details:
-            detail_lines.append(
-                f"  - 材质方向: {material}；尺寸: {size}；"
-                f"字段: {target_column}；缺少图片: {required_image}"
-            )
+        for required_image in required_images:
+            detail_lines.append(f"  - 缺少图片: {required_image}")
         detail_lines.append("")
     args.missing_image_details_output.parent.mkdir(parents=True, exist_ok=True)
     args.missing_image_details_output.write_text(
@@ -870,7 +1019,9 @@ def main() -> None:
         f"缺图明细：{len(unique_missing_image_details)} 项，"
         f"报告已保存至：{args.missing_image_details_output}"
     )
-    if unique_missing_image_details:
+    if unique_missing_image_details and args.no_group_notification:
+        print("已按参数关闭飞书群缺图通知")
+    elif unique_missing_image_details:
         try:
             send_missing_image_notifications(detail_lines)
         except RuntimeError as exc:

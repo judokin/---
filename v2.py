@@ -177,13 +177,21 @@ def process_file(data_path):
     width_unit = get_required_value(1, "商品宽度单位")
     seller_sku = get_required_value(0, "卖家 SKU")
     invalid_filename_chars = '<>:"/\\|?*'
+    safe_material_direction = "".join(
+        "_" if char in invalid_filename_chars else char
+        for char in material_direction
+    ).strip().rstrip(".")
     safe_store_name = "".join(
         "_" if char in invalid_filename_chars else char
         for char in store_name
     ).strip().rstrip(".")
+    if not safe_material_direction:
+        raise ValueError(f"材质方向无法用于生成文件名：{material_direction}")
     if not safe_store_name:
         raise ValueError(f"FBM上架店铺无法用于生成文件名：{store_name}")
-    output_name_prefix = f'{width_unit}_{seller_sku}_{safe_store_name}_'
+    output_name_prefix = (
+        f'{safe_material_direction}_{width_unit}_{seller_sku}_{safe_store_name}_'
+    )
     existing_outputs = sorted(
         path for path in input_dir.glob('*.xlsm')
         if path.name.startswith(output_name_prefix)
@@ -625,9 +633,15 @@ def process_file(data_path):
 
     mapping_overrides = store_mapping_overrides.get(store_name, {})
     feishu_to_template_mapping.update(mapping_overrides)
-    material_mapping_overrides = material_store_mapping_overrides.get(
-        (material_direction, store_name),
-        {},
+    material_mapping_overrides = {}
+    if material_direction == "仿羊绒厨房垫":
+        # 厨房垫模板的 Texture 属性位于 DN 列（第 5 行属性 ID 为 texture）。
+        material_mapping_overrides["Texture"] = "DN"
+    material_mapping_overrides.update(
+        material_store_mapping_overrides.get(
+            (material_direction, store_name),
+            {},
+        )
     )
     feishu_to_template_mapping.update(material_mapping_overrides)
     print(

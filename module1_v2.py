@@ -368,6 +368,69 @@ def get_all_table_data(
             break
         # import pdb;pdb.set_trace()
     return items_list
+FIVE_POINTS_APP_TOKEN = 'Jolyb8QBoaPzj6swf0cc6bqenlf'
+FIVE_POINTS_TABLE_TOKEN = 'tblYg6tDUuMAKsfT'
+FIVE_POINTS_TABLE_URL = (
+    'https://wit0jhu6kvu.feishu.cn/base/'
+    f'{FIVE_POINTS_APP_TOKEN}?table={FIVE_POINTS_TABLE_TOKEN}'
+)
+
+
+def post_feishu_search_with_retry(
+    url,
+    headers,
+    data,
+    context,
+    status_label,
+    max_retries=5,
+):
+    """请求飞书多维表格；网络抖动或临时服务异常时重试同一页。"""
+    last_failure = "未知错误"
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=data,
+                timeout=30,
+            )
+        except requests.exceptions.RequestException as exc:
+            last_failure = f"网络异常：{type(exc).__name__}: {exc}"
+        else:
+            print(status_label, response.status_code)
+            try:
+                data_json = response.json()
+            except ValueError:
+                data_json = {}
+                last_failure = (
+                    f"HTTP {response.status_code}，返回非 JSON："
+                    f"{response.text[:500]}"
+                )
+            else:
+                if (
+                    response.ok
+                    and isinstance(data_json.get('data'), dict)
+                    and isinstance(data_json['data'].get('items'), list)
+                ):
+                    return data_json
+                last_failure = (
+                    f"HTTP {response.status_code}，"
+                    f"code={data_json.get('code')}，msg={data_json.get('msg')}"
+                )
+
+        if attempt < max_retries - 1:
+            wait_seconds = 2 ** attempt
+            print(
+                f"{context}第 {attempt + 1} 次失败：{last_failure}；"
+                f"{wait_seconds} 秒后重试同一请求"
+            )
+            time.sleep(wait_seconds)
+
+    raise RuntimeError(
+        f"{context}连续 {max_retries} 次失败：{last_failure}"
+    )
+
+
 def get_five_points_table_data():
     import datetime
     # https://wit0jhu6kvu.feishu.cn/base/CUgObJq4aas1busUW5HcU4scnSd?table=tblcscrczF5v3pCm&view=vewA4pwieU
@@ -375,7 +438,11 @@ def get_five_points_table_data():
     # 查询多维表格数据
     # https://wit0jhu6kvu.feishu.cn/base/U7dFbJst5aur9xs2pWac0k4unuc?table=tblcLQ2Gk5Jh5T0y&view=vewGFhSEMr
     # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblYg6tDUuMAKsfT&view=vewoqs4zTj
-    url = "https://open.feishu.cn/open-apis/bitable/v1/apps/Jolyb8QBoaPzj6swf0cc6bqenlf/tables/tblYg6tDUuMAKsfT/records/search?page_size=500"
+    url = (
+        'https://open.feishu.cn/open-apis/bitable/v1/apps/'
+        f'{FIVE_POINTS_APP_TOKEN}/tables/{FIVE_POINTS_TABLE_TOKEN}/'
+        'records/search?page_size=500'
+    )
 
     # 定义请求头
     headers = {
@@ -384,6 +451,7 @@ def get_five_points_table_data():
     }
     page_token = ""
     items_list = []
+    feishu_row_number = 0
     for i in range(100):
         if page_token != "":
             url += "&page_token=" + page_token
@@ -391,22 +459,24 @@ def get_five_points_table_data():
         else:
             pass
         data = {}
-        # 发送 POST 请求
-        response = requests.post(url, headers=headers, json=data)
-
-        # 输出返回的状态码和响应数据
-        print("Status Code2:", response.status_code)
-        data_json = {}
-        try:
-            data_json = response.json()
-            #print("Response JSON:", response.json())
-        except ValueError:
-            pass
-            print("Response Text:", response.text)
+        data_json = post_feishu_search_with_retry(
+            url,
+            headers,
+            data,
+            context=(
+                f"飞书五点文案表查询（page_token="
+                f"{page_token or '<第一页>'}）"
+            ),
+            status_label="Status Code2:",
+        )
         #datas = []
         for i, items in enumerate(data_json['data']['items']):
+            feishu_row_number += 1
             if len(items['fields']) == 0:
                 continue
+            # 多维表接口不返回界面固定行号，保存当前接口返回顺序，
+            # 并同时保留 record_id，便于报错时准确定位记录。
+            items['_feishu_row_number'] = feishu_row_number
             # print(items)
             # print("----------------------------------- i =", i)
             items_list.append(items)
@@ -451,12 +521,15 @@ def timestamp_ms_to_datetime(
     return dt.strftime(fmt)
 
 
-def get_table_data(material_direction=None):
+def get_table_data(material_direction=None, skcs=None):
     '''
     父类子类基础数据
     先匹配子类，再匹配父类
     '''
     material_direction = str(material_direction or '').strip()
+    skcs = list(dict.fromkeys(
+        str(skc).strip() for skc in (skcs or []) if str(skc).strip()
+    ))
     items_list = get_five_points_table_data()
     parent_items_dict = {}
     for item in items_list:
@@ -477,15 +550,11 @@ def get_table_data(material_direction=None):
         "Authorization": "Bearer " + tenant_access_token,
         "Content-Type": "application/json"
     }
-    page_token = ""
-    
     skc_datas = {}
-    for i in range(2):
-        if page_token != "":
-            url += "&page_token=" + page_token
-            pass
-        else:
-            pass
+    # 飞书文本字段的 is 操作符一次只能精确匹配一个值；
+    # SKCS.txt 中的每个 SKC 分别发起查询，避免多值条件返回 400。
+    query_skcs = skcs or [None]
+    for query_skc in query_skcs:
         conditions = [
             {
                 "field_name": "父体SKU",
@@ -503,6 +572,12 @@ def get_table_data(material_direction=None):
                 "value": [glv['gvar_shop_name']]
             }
         ]
+        if query_skc:
+            conditions.append({
+                "field_name": "SKC",
+                "operator": "is",
+                "value": [query_skc],
+            })
         if material_direction:
             conditions.append({
                 "field_name": "材质方向",
@@ -516,18 +591,13 @@ def get_table_data(material_direction=None):
             }
         }
         print(data)
-        # 发送 POST 请求
-        response = requests.post(url, headers=headers, json=data)
-        #print(response.text)
-        # 输出返回的状态码和响应数据
-        print("Status Code3:", response.status_code)
-        data_json = {}
-        try:
-            data_json = response.json()
-            #print("Response JSON:", response.json())
-        except ValueError:
-            pass
-            print("Response Text:", response.text)
+        data_json = post_feishu_search_with_retry(
+            url,
+            headers,
+            data,
+            context=f"飞书花型表查询（SKC={query_skc or '<全部>'}）",
+            status_label="Status Code3:",
+        )
         #datas = []
         for i, items in enumerate(data_json['data']['items']):
             if len(items['fields']) == 0:
@@ -590,7 +660,34 @@ def get_table_data(material_direction=None):
                 for point_key in  ['商品特性1', '商品特性2', '商品特性3', '商品特性4', '商品特性5']:
                     point_key = glv['材质方向'] + '-' + point_key
                     #print(point_key, '文案:', my_list['fields'][point_key][0]['text'])
-                    five_point_texts.append(parent_item_text_info['fields'][point_key][0]['text'].replace("#####", rp))
+                    point_text = get_feishu_field_text(
+                        parent_item_text_info['fields'],
+                        point_key,
+                    )
+                    if not point_text:
+                        feishu_row = parent_item_text_info.get(
+                            '_feishu_row_number',
+                            '<未知>',
+                        )
+                        record_id = parent_item_text_info.get(
+                            'record_id',
+                            '<未知>',
+                        )
+                        error_skc = get_feishu_field_text(
+                            items.get('fields', {}),
+                            'SKC',
+                            '花型命名',
+                        ) or '<空>'
+                        error_message = (
+                            f"飞书五点文案表第 {feishu_row} 行缺少字段：{point_key}；"
+                            f"SKC：{error_skc}；父体 SKU：{pskc or '<空>'}；"
+                            f"记录 ID：{record_id}；"
+                            f"表 ID：{FIVE_POINTS_TABLE_TOKEN}；表链接："
+                            f"{FIVE_POINTS_TABLE_URL}"
+                        )
+                        print(error_message)
+                        raise KeyError(error_message)
+                    five_point_texts.append(point_text.replace("#####", rp))
                 product_description = get_feishu_field_text(
                     parent_item_text_info['fields'],
                     glv['材质方向'] + '-Product Description',
@@ -766,10 +863,25 @@ def get_table_data(material_direction=None):
                         tag = key_word.split("的")[0]
                         print("\n\n\n")
                         skc_datas[skc][tag] = {}
+                        color_field = items['fields'].get('颜色', '')
+                        if isinstance(color_field, list):
+                            color = color_field[0].get('text', '') if color_field else ''
+                        elif isinstance(color_field, dict):
+                            color = color_field.get('text', '')
+                        else:
+                            color = color_field or ''
                         try:
-                            # 标题后加颜色
+                            # 标题文案同时兼容颜色和花型占位符。
                             skc_datas[skc][tag]['标题'] = items['fields'][key_word][0]['text']
-                            skc_datas[skc][tag]['标题'] = skc_datas[skc][tag]['标题'].replace("#####", rp)
+                            skc_datas[skc][tag]['标题'] = (
+                                re.sub(
+                                    r'\bCOLOR\b',
+                                    lambda _: color,
+                                    skc_datas[skc][tag]['标题'].replace("##颜色##", color),
+                                    flags=re.IGNORECASE,
+                                )
+                                .replace("#####", rp)
+                            )
                         except:
                             items['fields'][key_word] = [{"text": ""}]
                             skc_datas[skc][tag]['标题'] = ''
@@ -783,14 +895,15 @@ def get_table_data(material_direction=None):
                             subtitle = subtitle_field.get('text', '')
                         else:
                             subtitle = subtitle_field or ''
-                        color_field = items['fields'].get('颜色', '')
-                        if isinstance(color_field, list):
-                            color = color_field[0].get('text', '') if color_field else ''
-                        elif isinstance(color_field, dict):
-                            color = color_field.get('text', '')
-                        else:
-                            color = color_field or ''
-                        skc_datas[skc][tag]['副标题'] = subtitle.replace("##颜色##", color).replace("#####", rp)
+                        skc_datas[skc][tag]['副标题'] = (
+                            re.sub(
+                                r'\bCOLOR\b',
+                                lambda _: color,
+                                subtitle.replace("##颜色##", color),
+                                flags=re.IGNORECASE,
+                            )
+                            .replace("#####", rp)
+                        )
                         try:
                             print(tag, 'SKU :', skc + '-' + key_word.split("的")[0])
                         except:
@@ -815,11 +928,6 @@ def get_table_data(material_direction=None):
             # print("skc=", skc)
 
         pass
-        if 'has_more' in data_json['data'] and data_json['data']['has_more']:
-            page_token = data_json['data']['page_token']
-            print("page_tokenpage_tokenpage_token", page_token)
-        else:
-            break
     for skc in skc_datas:
         if '印花地毯' == skc_datas[skc]['材质方向']:
             continue
@@ -893,6 +1001,11 @@ def normalize_product_type(value):
         return ''
     return str(value).strip().upper()
 
+def build_child_seller_sku(skc, size_text, material_direction):
+    """按材质方向生成子体卖家 SKU。"""
+    suffix = 'FT-SMZ-POD' if material_direction == '三明治户外垫' else 'FT-POD'
+    return f"{str(skc).strip()}-{str(size_text).upper()}{suffix}"
+
 def _generate_single_shop(
     skcs,
     test_mode,
@@ -901,6 +1014,9 @@ def _generate_single_shop(
     material_direction=None,
 ):
     material_direction = str(material_direction or '').strip()
+    skcs = list(dict.fromkeys(
+        str(skc).strip() for skc in (skcs or []) if str(skc).strip()
+    ))
     if not material_direction:
         raise ValueError("材质方向不能为空")
     dir_path = r"D:\项目文件\AI自动上架\\"
@@ -908,7 +1024,7 @@ def _generate_single_shop(
     skc_datas = copy.deepcopy(
         preloaded_skc_datas
         if preloaded_skc_datas is not None
-        else get_table_data(material_direction=material_direction)
+        else get_table_data(material_direction=material_direction, skcs=skcs)
     )
     gd_dict = {}
     # guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblTer6BHOZRAQkB')
@@ -1071,18 +1187,22 @@ def _generate_single_shop(
             existing_child_keys.add((child_skc, child_size))
 
     for skc in skc_datas.keys():
-        guding_info = gd_dict[skc_datas[skc]['材质方向']]
+        skc_material_direction = skc_datas[skc]['材质方向']
+        guding_info = gd_dict[skc_material_direction]
         for size_text in guding_info.keys():
             skc = skc.strip()
             size_text = size_text.upper()
             if (skc, size_text) in existing_child_keys:
                 continue
             print("SKC", skc)
-            print("卖家 SKU", skc + '-' + size_text)
+            seller_sku = build_child_seller_sku(
+                skc, size_text, skc_material_direction
+            )
+            print("卖家 SKU", seller_sku)
             need_skc = skc
             add_data['records'].append({"fields": {
             "SKC": skc,
-            "卖家 SKU": skc + '-' + size_text + 'FT-POD',
+            "卖家 SKU": seller_sku,
             "风格": skc_datas[skc]['风格'],
             #"店铺": "岚风",
             "店铺": glv['gvar_shop_name'],
@@ -1197,6 +1317,11 @@ def _generate_single_shop(
                     if 'size_text' in chrildren_item['fields'] and chrildren_item['fields']['size_text'] and size_text == chrildren_item['fields']['size_text'][0]['text']:
                         data = {
                             "fields": {
+                                "卖家 SKU": build_child_seller_sku(
+                                    skc,
+                                    size_text,
+                                    datas['材质方向'],
+                                ),
                                 "颜色": datas[size_text]['颜色'],
                                 "商品名称": datas[size_text]['标题'],
                                 "商品特性": datas[size_text]['文案1'],
@@ -1294,7 +1419,11 @@ def _generate_single_shop(
                         data_item["商品尺寸"] = chrildren_item['fields']['商品尺寸'][0]['text'] if '商品尺寸' in chrildren_item['fields'] else size_text
                         data_item["size_text"] = chrildren_item['fields']['size_text'][0]['text'] if 'size_text' in chrildren_item['fields'] else size_text
                         data_item["SKC"] = skc
-                        data_item["卖家 SKU"] = skc + "-" + size_text + 'FT-POD'
+                        data_item["卖家 SKU"] = build_child_seller_sku(
+                            skc,
+                            size_text,
+                            datas['材质方向'],
+                        )
                         datas[size_text]['标题'] = trim_text(datas[size_text]['标题'], words_list[0]['fields']['违禁词列表'][0]['text'].split(","))
                         data_item["商品名称"] = datas[size_text]['标题']
                         data_item["副标题"] = datas[size_text]['副标题']
@@ -1613,7 +1742,10 @@ def m(test_mode=None, material_direction=None):
                 f"\n========== 店铺 [{shop_index}/{len(shop_name_list)}]："
                 f"{shop_name} =========="
             )
-            shop_skc_datas = get_table_data(material_direction=material_direction)
+            shop_skc_datas = get_table_data(
+                material_direction=material_direction,
+                skcs=skcs,
+            )
             matched_skcs = [skc for skc in skcs if skc in shop_skc_datas]
             parent_batches = {}
             for skc in matched_skcs:

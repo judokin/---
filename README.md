@@ -11,13 +11,14 @@ output_feishu_table_data_<店铺>_<父体SKU>.xlsx
     ↓ set_excel_by_skc_size.py
 *_尺寸图片已匹配.xlsx
     ↓ v2.py
-<店铺>_<SKU>_<时间戳>.xlsm
+<材质方向>_<宽度单位>_<SKU>_<店铺>_<时间戳>.xlsm
     ↓ upload.py
 飞书云盘 + 飞书机器人通知
 ```
 
 各脚本职责：
 
+- `fetch_skcs_by_material.py`：按材质方向读取指定飞书视图的 `SKC` 字段，覆盖生成 `D:\NAS_download\SKCS.txt`，并把生成结果发送到飞书群。
 - `module1_v2.py`：读取飞书商品、固定属性和违禁词等数据，可按材质方向筛选，再按店铺及父体 SKU 分批生成上架源数据；正式模式还会回写飞书子表。
 - `set_excel_by_skc_size.py`：读取每个 SKC 的图片数据，根据材质方向匹配主图、其他图片及样本图片 URL；目前支持印花地毯、仿羊绒厨房垫和三明治户外垫。
 - `v2.py`：根据 `材质方向 + FBM上架店铺` 选择对应的 `.xlsm` 模板，通过本机 Excel 生成最终上架文件。
@@ -47,7 +48,7 @@ python -m pip install pandas openpyxl xlwings requests
 D:\项目文件\AI自动上架\
 ├─ output_feishu_table_data_*.xlsx
 ├─ *_尺寸图片已匹配.xlsx
-├─ <店铺>_<SKU>_<时间戳>.xlsm
+├─ <材质方向>_<宽度单位>_<SKU>_<店铺>_<时间戳>.xlsm
 └─ 模板文件\
    └─ <材质方向>-模板文件v2_<FBM上架店铺>.xlsm
 
@@ -91,7 +92,48 @@ rg "D:\\|Jolyb8Q|tbl|FEISHU_PARENT_NODE" -g "*.py" .
 
 建议依次执行以下步骤。
 
-### 1. 生成上架源数据
+### 1. 从飞书视图生成 SKCS.txt
+
+必须通过 `--material-direction` 指定材质方向：
+
+```powershell
+python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images --no-group-notification
+python fetch_skcs_by_material.py --material-direction "仿羊绒厨房垫" --check-images --no-group-notification
+python fetch_skcs_by_material.py --material-direction "三明治户外垫" --check-images --no-group-notification
+```
+
+生成清单后立即检查 PostgreSQL 图片是否齐全：
+
+```powershell
+python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images
+```
+
+这个一键入口会先读取飞书候选 SKC，再复用 `pg_set_excel_by_skc_size.py` 的 PostgreSQL 查询和图片匹配规则执行只读检查，不会生成或修改上架 Excel。印花地毯默认检查 `2X3`、`2X5`、`5X7`、`8X10` 四个标准产品尺寸。缺少任一必需图片的 SKC 会写入缺图报告，并从最终 `SKCS.txt` 排除；只有图片齐全的 SKC 才会写入清单。图片检查失败时不会覆盖原有 `SKCS.txt`。
+
+检查结果会写入：
+
+```text
+D:\NAS_download\数据库无图片的SKC.txt
+D:\code\亚马逊自动上架-批量上架脚本\缺图明细.txt
+```
+
+默认会把检查汇总和缺图明细发送到飞书群。仅关闭图片检查通知（不影响原有的 `SKCS.txt` 更新通知）：
+
+```powershell
+python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images --no-group-notification
+```
+
+材质与飞书视图的对应关系：
+
+| 材质方向 | 飞书视图 ID |
+|---|---|
+| 印花地毯 | `vew1r9vIKo` |
+| 仿羊绒厨房垫 | `vewyE7tvJK` |
+| 三明治户外垫 | `vew0xHeRAu` |
+
+脚本分页读取视图中的 `SKC` 字段，清理空行并按出现顺序去重，然后覆盖写入 `D:\NAS_download\SKCS.txt`（UTF-8、每行一个 SKC）。写入成功后，会向配置的飞书机器人群发送材质方向、SKC 数量、保存位置和 SKC 明细；明细过长时自动分段发送。视图没有数据时会生成空文件，并发送“0 个 SKC”的通知。
+
+### 2. 生成上架源数据
 
 ```powershell
 python module1_v2.py
@@ -105,6 +147,8 @@ python module1_v2.py
 python module1_v2.py --material-direction "印花地毯"
 python module1_v2.py --material-direction "仿羊绒厨房垫"
 python module1_v2.py --material-direction "三明治户外垫"
+
+python pg_set_excel_by_skc_size.py --no-feishu-notification
 ```
 
 不传 `--material-direction` 时处理全部材质。模块/RPA 调用也支持 `material_direction` 或 `材质方向` 入参。
@@ -116,7 +160,7 @@ python module1_v2.py --material-direction "三明治户外垫"
 
 首次运行或调试时建议先使用测试模式。
 
-### 2. 匹配图片 URL
+### 3. 匹配图片 URL
 
 批量处理默认目录中的所有源数据：
 
@@ -181,7 +225,7 @@ D:\项目文件\AI自动上架\缺少图片的SKC.txt
 
 文件名匹配忽略大小写、空格，并兼容 `x/X/×` 和半角/全角加号。
 
-### 3. 生成最终 XLSM
+### 4. 生成最终 XLSM
 
 ```powershell
 python v2.py
@@ -191,6 +235,12 @@ python v2.py
 
 ```text
 <材质方向>-模板文件v2_<FBM上架店铺>.xlsm
+```
+
+最终文件命名规则为：
+
+```text
+<材质方向>_<宽度单位>_<首个卖家SKU>_<FBM上架店铺>_<14位时间戳>.xlsm
 ```
 
 同一个输入文件只能包含一个非空材质方向和一个店铺。不同材质模板的 Amazon 列序可能不同，因此映射配置分为“店铺覆盖”和“材质 + 店铺覆盖”。当前已配置专属映射的组合包括：
@@ -224,7 +274,7 @@ D:\NAS_download\nas_path_out_path.txt
 
 执行期间请勿手动关闭脚本创建的 Excel 实例。
 
-### 4. 上传飞书云盘
+### 5. 上传飞书云盘
 
 ```powershell
 python upload.py

@@ -1,5 +1,6 @@
 # 配置文件（包含敏感凭证）
 config.py
+pg.config
 
 # 本地数据文件
 D:/NAS_download/
