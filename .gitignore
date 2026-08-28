@@ -14,6 +14,14 @@ D:/rpa_tools/
 *.xlsm
 *.xlsx
 ~$*.xlsx
+__pycache__/
+*.py[cod]
+
+# 仅供本机运行或生成的辅助文件
+fetch_skcs_by_material.py
+印花地毯.bat
+提示词.txt
+缺图明细.txt
 
 # 上传记录
 *uploaded_files.json
