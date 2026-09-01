@@ -135,6 +135,14 @@ python fetch_skcs_by_material.py --material-direction "印花地毯" --check-ima
 
 ### 2. 生成上架源数据
 
+仅处理一个 SKC（不读取或修改 `SKCS.txt`）：
+
+```powershell
+python module1_v2.py --material-direction "印花地毯" --skc "DT5001-V7ORANGE"
+```
+
+单 SKC 模式不要求花型记录的 `父体SKU` 非空。已有父体 SKU 时仍使用原值；为空时，用花型记录的 `花型风格`、当前匹配店铺、`运营团队分配`，精确匹配父体表 `tblZOU82tgaLNhAx` 中的 `风格`、`店铺`、`团队`（人员 ID 集合）。只有唯一匹配才继续，并要求父体在五点文案表中有对应记录；无匹配、多匹配或条件缺失会明确报错，不自动回写花型表。其他筛选条件及正式模式的子表写入行为保持不变。
+
 ```powershell
 python module1_v2.py
 ```
@@ -147,6 +155,7 @@ python module1_v2.py
 python module1_v2.py --material-direction "印花地毯"
 python module1_v2.py --material-direction "仿羊绒厨房垫"
 python module1_v2.py --material-direction "三明治户外垫"
+python module1_v2.py --material-direction "印花地毯" --skc "DT5001-V7ORANGE"
 
 python pg_set_excel_by_skc_size.py --no-feishu-notification
 ```

@@ -521,7 +521,49 @@ def timestamp_ms_to_datetime(
     return dt.strftime(fmt)
 
 
-def get_table_data(material_direction=None, skcs=None):
+def match_parent_for_single_skc(fields, parent_records, store_name):
+    """父体为空时，按花型风格、店铺、团队人员 ID 精确匹配唯一父体。"""
+    skc = get_feishu_field_text(fields, 'SKC')
+    style = get_feishu_field_text(fields, '花型风格', '风格')
+
+    def team_ids(value):
+        members = value if isinstance(value, list) else [value]
+        return frozenset(
+            str(member['id']).strip()
+            for member in members
+            if isinstance(member, dict) and member.get('id')
+        )
+
+    team = team_ids(fields.get('运营团队分配') or fields.get('团队'))
+    context = f"SKC={skc}，风格={style or '<空>'}，店铺={store_name}，团队ID={sorted(team)}"
+    if not style or not store_name or not team:
+        raise ValueError(f"无法匹配父体，匹配条件不完整：{context}")
+    matches = []
+    for record in parent_records:
+        parent_fields = record.get('fields', {})
+        if (
+            get_feishu_field_text(parent_fields, '风格') == style
+            and get_feishu_field_text(parent_fields, '店铺') == store_name
+            and team_ids(parent_fields.get('团队')) == team
+        ):
+            matches.append(record)
+    if len(matches) != 1:
+        candidates = [
+            (get_feishu_field_text(item.get('fields', {}), 'SKU', '卖家 SKU'),
+             item.get('record_id', '<未知>')) for item in matches
+        ]
+        raise ValueError(
+            f"父体表 tblZOU82tgaLNhAx 匹配到 {len(matches)} 条记录，"
+            f"必须唯一：{context}，候选={candidates}"
+        )
+    parent_sku = get_feishu_field_text(matches[0].get('fields', {}), 'SKU', '卖家 SKU')
+    if not parent_sku:
+        raise ValueError(f"匹配父体的 SKU 为空：{context}，record_id={matches[0].get('record_id')}")
+    print(f"单 SKC 自动匹配父体：{context} → {parent_sku}")
+    return parent_sku
+
+
+def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=False):
     '''
     父类子类基础数据
     先匹配子类，再匹配父类
@@ -535,7 +577,8 @@ def get_table_data(material_direction=None, skcs=None):
     for item in items_list:
         if '卖家 SKU' not in item['fields']:
             continue
-        parent_items_dict[item['fields']['卖家 SKU']] = item
+        parent_items_dict[get_feishu_field_text(item['fields'], '卖家 SKU')] = item
+    fallback_parent_records = None
 
     # import  pdb;pdb.set_trace()
     import datetime
@@ -572,6 +615,8 @@ def get_table_data(material_direction=None, skcs=None):
                 "value": [glv['gvar_shop_name']]
             }
         ]
+        if resolve_missing_parent:
+            conditions = [c for c in conditions if c['field_name'] != '父体SKU']
         if query_skc:
             conditions.append({
                 "field_name": "SKC",
@@ -603,13 +648,22 @@ def get_table_data(material_direction=None, skcs=None):
             if len(items['fields']) == 0:
                 continue
             parent_item_text_info = {}
-            pskc = ''
-            if '父体SKU' in items['fields'] and items['fields']['父体SKU'] in parent_items_dict:
-                parent_item_text_info = parent_items_dict[items['fields']['父体SKU']]
-                pskc = items['fields']['父体SKU']
-            else:
-                parent_item_text_info = list(parent_items_dict.values())[0]
+            pskc = get_feishu_field_text(items['fields'], '父体SKU')
+            if not pskc and resolve_missing_parent:
+                if fallback_parent_records is None:
+                    fallback_parent_records = get_all_table_data(
+                        'Jolyb8QBoaPzj6swf0cc6bqenlf', 'tblZOU82tgaLNhAx'
+                    )
+                pskc = match_parent_for_single_skc(
+                    items['fields'], fallback_parent_records, glv['gvar_shop_name']
+                )
+            if pskc not in parent_items_dict:
+                if resolve_missing_parent:
+                    raise ValueError(
+                        f"SKC={query_skc}，父体={pskc} 在五点文案表中没有对应的卖家 SKU"
+                    )
                 continue
+            parent_item_text_info = parent_items_dict[pskc]
             # import random
             # my_list = random.choice(items_list)
             five_point_texts = []
@@ -1697,7 +1751,7 @@ def _generate_single_shop(
     return output_feishu_path
 
 
-def m(test_mode=None, material_direction=None):
+def m(test_mode=None, material_direction=None, skc=None):
     """遍历全部店铺，并生成指定材质方向的可处理 SKC。"""
     if test_mode is None:
         test_mode = TEST_MODE
@@ -1708,15 +1762,21 @@ def m(test_mode=None, material_direction=None):
             "--material-direction \"材质方向\""
         )
 
-    skcs_path = r"D:\NAS_download\SKCS.txt"
-    if not os.path.isfile(skcs_path):
-        raise FileNotFoundError(f"SKC 清单不存在：{skcs_path}")
-    with open(skcs_path, 'r', encoding='utf-8-sig') as skcs_file:
-        skcs = list(dict.fromkeys(
-            line.strip() for line in skcs_file if line.strip()
-        ))
-    if not skcs:
-        raise ValueError(f"SKC 清单为空：{skcs_path}")
+    single_skc = str(skc).strip() if skc is not None else None
+    if single_skc is not None:
+        if not single_skc:
+            raise ValueError('--skc 不能为空')
+        skcs = [single_skc]
+    else:
+        skcs_path = r"D:\NAS_download\SKCS.txt"
+        if not os.path.isfile(skcs_path):
+            raise FileNotFoundError(f"SKC 清单不存在：{skcs_path}")
+        with open(skcs_path, 'r', encoding='utf-8-sig') as skcs_file:
+            skcs = list(dict.fromkeys(
+                line.strip() for line in skcs_file if line.strip()
+            ))
+        if not skcs:
+            raise ValueError(f"SKC 清单为空：{skcs_path}")
 
     original_shop_name = glv.get('gvar_shop_name', '')
     original_shop_name_list = glv.get('gvar_shop_name_list', [])
@@ -1730,7 +1790,7 @@ def m(test_mode=None, material_direction=None):
     material_name = material_direction or "全部材质"
     print(
         f"开始批量生成：{mode_name}，店铺 {len(shop_name_list)} 个，"
-        f"SKCS.txt 共 {len(skcs)} 个 SKC，材质方向：{material_name}"
+        f"{'单 SKC 参数' if single_skc else 'SKCS.txt'} 共 {len(skcs)} 个 SKC，材质方向：{material_name}"
     )
 
     generated_paths = []
@@ -1745,6 +1805,7 @@ def m(test_mode=None, material_direction=None):
             shop_skc_datas = get_table_data(
                 material_direction=material_direction,
                 skcs=skcs,
+                resolve_missing_parent=single_skc is not None,
             )
             matched_skcs = [skc for skc in skcs if skc in shop_skc_datas]
             parent_batches = {}
@@ -1812,7 +1873,8 @@ def get_material_direction_arg(args):
 
 
 def main(args=None):
-    return m(material_direction=get_material_direction_arg(args))
+    skc = args.get('skc') if isinstance(args, dict) else getattr(args, 'skc', None)
+    return m(material_direction=get_material_direction_arg(args), skc=skc)
 
 
 if __name__ == "__main__":
@@ -1824,6 +1886,7 @@ if __name__ == "__main__":
         required=True,
         help="必须指定要精确筛选的材质方向",
     )
+    parser.add_argument('--skc', help='只处理指定 SKC，不读取 SKCS.txt；父体为空时按风格、店铺、团队匹配')
     main(parser.parse_args())
     # if not OUT_FILE_RES:
     #     m()
