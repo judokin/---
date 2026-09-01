@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 from urllib.error import HTTPError, URLError
@@ -96,6 +97,47 @@ def normalize_size(value: object) -> str:
     return size
 
 
+def normalize_image_name(value: object) -> str:
+    """统一图片文件名，供关键词、尺寸和错误裸文件名识别共用。"""
+    return (
+        normalize_text(value)
+        .upper()
+        .replace("×", "X")
+        .replace("＋", "+")
+        .replace(" ", "")
+    )
+
+
+def size_from_image_name(file_name: object) -> str:
+    """从图片文件名中提取第一个 AxB 尺寸，例如白底图5X7.jpg。"""
+    normalized_name = normalize_image_name(file_name)
+    match = re.search(
+        r"(?<!\d)(\d+(?:\.\d+)?)X(\d+(?:\.\d+)?)(?!\d)",
+        normalized_name,
+    )
+    if not match:
+        return ""
+    return normalize_size(f"{match.group(1)}X{match.group(2)}")
+
+
+def is_bare_skc_size_image(
+    file_name: object,
+    skc: object,
+    size: object,
+) -> bool:
+    """识别误上传的“<SKC>-<尺寸>.<扩展名>”裸命名图片。"""
+    normalized_skc = normalize_image_name(skc)
+    normalized_size = normalize_size(size)
+    if not normalized_skc or not normalized_size:
+        return False
+
+    file_stem = Path(normalize_text(file_name)).stem
+    normalized_stem = normalize_image_name(file_stem)
+    bare_suffix = normalize_image_name(f"{normalized_skc}-{normalized_size}")
+    # URL 对象名可能在真实文件名前附加 SKC/目录前缀，因此使用结尾匹配。
+    return normalized_stem.endswith(bare_suffix)
+
+
 def first_url(rows: pd.DataFrame) -> str:
     """取得数据集合中的第一个非空图片地址。"""
     if rows.empty or "图片地址" not in rows.columns:
@@ -120,15 +162,6 @@ def urls(rows: pd.DataFrame) -> list[str]:
 
 def pick_named_url(image_df: pd.DataFrame, *keywords: str) -> str:
     """按文件名关键词优先级取得图片地址。"""
-    def normalize_image_name(value: object) -> str:
-        return (
-            normalize_text(value)
-            .upper()
-            .replace("×", "X")
-            .replace("＋", "+")
-            .replace(" ", "")
-        )
-
     file_names = image_df["文件名"].map(normalize_image_name)
     for keyword in keywords:
         normalized_keyword = normalize_image_name(keyword)
@@ -426,12 +459,17 @@ def load_image_data_from_pg(
     records = []
     for skc, file_name, url, size_label, image_type in rows:
         restored_name = decoded_image_name(url, file_name)
+        effective_type = infer_image_type(restored_name, image_type)
+        effective_size = normalize_size(size_label)
+        if effective_type == "白底图":
+            # 白底图优先相信文件名中的尺寸，数据库 size_label 仅作为回退。
+            effective_size = size_from_image_name(restored_name) or effective_size
         records.append({
             "SKC": normalize_text(skc),
             "文件名": restored_name,
             "图片地址": normalize_text(url),
-            "尺寸": normalize_size(size_label),
-            "图片类型": infer_image_type(restored_name, image_type),
+            "尺寸": effective_size,
+            "图片类型": effective_type,
         })
 
     if not records:
@@ -453,6 +491,30 @@ def build_image_pool(image_df: pd.DataFrame) -> dict[str, object]:
     image_df = image_df.copy()
     image_df["标准尺寸"] = image_df["尺寸"].map(normalize_size)
     image_df["标准图片类型"] = image_df["图片类型"].map(normalize_text)
+
+    # 白底图再次按 file_name 校准尺寸，使手工构造的数据也遵循文件名优先。
+    white_mask = image_df["标准图片类型"] == "白底图"
+    white_name_sizes = image_df.loc[white_mask, "文件名"].map(
+        size_from_image_name
+    )
+    usable_white_name_sizes = white_name_sizes[white_name_sizes != ""]
+    image_df.loc[
+        usable_white_name_sizes.index,
+        "标准尺寸",
+    ] = usable_white_name_sizes
+
+    # 印花地毯不接受“<SKC>-<尺寸>.jpg”这类误上传裸文件名。
+    # 将其从候选池移除，避免凭较小 id 抢占“其他图片 URL1”等位置。
+    if "SKC" in image_df.columns:
+        bare_name_mask = image_df.apply(
+            lambda row: is_bare_skc_size_image(
+                row["文件名"],
+                row["SKC"],
+                row["标准尺寸"],
+            ),
+            axis=1,
+        )
+        image_df = image_df.loc[~bare_name_mask].copy()
 
     def by(size_values: Iterable[str], image_type: str) -> pd.DataFrame:
         return image_df[
