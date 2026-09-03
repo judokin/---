@@ -1688,6 +1688,13 @@ def _generate_single_shop(
         dir_path,
         f"output_feishu_table_data_{safe_shop_name}_{safe_parent_sku}.xlsx"
     )
+    # 三个材质统一处理：父体行的“零件编号”留空，
+    # 子体行使用各自最终生成、带尺寸后缀的卖家 SKU。
+    for export_index, export_item in enumerate(data_to_excel):
+        export_item['零件编号'] = (
+            '' if export_index == 0
+            else str(export_item.get('卖家 SKU') or '').strip()
+        )
     output_df = pd.DataFrame(data_to_excel)
     # 历史固定表中如果仍带有“关于此艺术品”，合并到新字段后删除旧列，
     # 保证父体和子体只写入同一个 Product Description 列。
