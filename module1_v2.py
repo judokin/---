@@ -297,7 +297,8 @@ def get_all_table_data(
     items_list = []
     for i in range(100):
         data = {}
-        if material_direction:
+        # 子表首次生成前尚无圣诞选项；跨材质读取以兼容历史同 SKU 子体。
+        if material_direction and material_direction != '印花地毯圣诞专用':
             data = {
                 "filter": {
                     "conjunction": "and",
@@ -417,6 +418,11 @@ def post_feishu_search_with_retry(
                     f"HTTP {response.status_code}，"
                     f"code={data_json.get('code')}，msg={data_json.get('msg')}"
                 )
+                if str(data_json.get('code')) == '1254018':
+                    raise RuntimeError(
+                        f"{context}筛选条件无效：{last_failure}；"
+                        "请检查字段类型、操作符及选项值，此错误不重试。"
+                    )
 
         if attempt < max_retries - 1:
             wait_seconds = 2 ** attempt
@@ -569,6 +575,10 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
     先匹配子类，再匹配父类
     '''
     material_direction = str(material_direction or '').strip()
+    # 圣诞专用是生成模式；花型表实际材质选项仍是“印花地毯”。
+    source_material_direction = (
+        '印花地毯' if material_direction == '印花地毯圣诞专用' else material_direction
+    )
     skcs = list(dict.fromkeys(
         str(skc).strip() for skc in (skcs or []) if str(skc).strip()
     ))
@@ -627,7 +637,7 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
             conditions.append({
                 "field_name": "材质方向",
                 "operator": "is",
-                "value": [material_direction]
+                "value": [source_material_direction]
             })
         data ={
             "filter": {
@@ -674,41 +684,57 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
             except:
                 print('continue002材质方向为空，跳过')
                 continue
-            if material_direction and glv['材质方向'] != material_direction:
+            if material_direction and source_material_direction not in items['fields']['材质方向']:
                 print(
                     f"材质方向不匹配，跳过：实际={glv['材质方向']}，"
-                    f"筛选={material_direction}"
+                    f"筛选={source_material_direction}"
                 )
                 continue
+            if material_direction:
+                glv['材质方向'] = material_direction
             # if '印花地毯' != glv['材质方向']:
             #     import pdb;pdb.set_trace()
             #     pass
             pattern = ''
             product_description = ''
-            if glv['材质方向'] in ['印花地毯']:
+            # 同一文案库按生成模式读取对应字段，圣诞文案不回退到普通印花字段。
+            if glv['材质方向'] in ['印花地毯', '印花地毯圣诞专用']:
+                rug_copy_prefix = (
+                    '26年圣诞' if glv['材质方向'] == '印花地毯圣诞专用' else '印花地毯'
+                )
                 for point_key in  ['商品特性1', '商品特性2', '商品特性3', '商品特性4', '商品特性5']:
-                    point_key = glv['材质方向'] + '-' + point_key
-                    #print(point_key, '文案:', my_list['fields'][point_key][0]['text'])
-                    five_point_texts.append(parent_item_text_info['fields'][point_key][0]['text'].replace("#####", rp))
+                    point_key = f'{rug_copy_prefix}-{point_key}'
+                    point_text = get_feishu_field_text(parent_item_text_info['fields'], point_key)
+                    if not point_text:
+                        error_skc = get_feishu_field_text(items['fields'], 'SKC', '花型命名') or '<空>'
+                        error_message = (
+                            f"飞书五点文案表第 {parent_item_text_info.get('_feishu_row_number', '<未知>')} 行缺少字段：{point_key}；"
+                            f"SKC：{error_skc}；父体 SKU：{pskc or '<空>'}；"
+                            f"记录 ID：{parent_item_text_info.get('record_id', '<未知>')}；"
+                            f"表 ID：{FIVE_POINTS_TABLE_TOKEN}；表链接：{FIVE_POINTS_TABLE_URL}"
+                        )
+                        print(error_message)
+                        raise KeyError(error_message)
+                    five_point_texts.append(point_text.replace("#####", rp))
                 product_description = get_feishu_field_text(
                     parent_item_text_info['fields'],
-                    glv['材质方向'] + '-Product Description',
-                    glv['材质方向'] + '-关于此艺术品'
+                    f'{rug_copy_prefix}-Product Description',
+                    f'{rug_copy_prefix}-关于此艺术品'
                 )
                 搜索关键词 = get_feishu_field_text(
                     parent_item_text_info['fields'],
-                    glv['材质方向'] + '-搜索关键词',
-                    glv['材质方向'] + '-Generic Keyword'
+                    f'{rug_copy_prefix}-搜索关键词',
+                    f'{rug_copy_prefix}-Generic Keyword'
                 )
                 设计 = get_feishu_field_text(
                     parent_item_text_info['fields'],
-                    glv['材质方向'] + '-设计',
-                    glv['材质方向'] + '-Style'
+                    f'{rug_copy_prefix}-设计',
+                    f'{rug_copy_prefix}-Style'
                 )
                 pattern = get_feishu_field_text(
                     parent_item_text_info['fields'],
-                    glv['材质方向'] + '-Pattern',
-                    glv['材质方向'] + '-Design'
+                    f'{rug_copy_prefix}-Pattern',
+                    f'{rug_copy_prefix}-Design'
                 )
             if glv['材质方向'] in ['三明治户外垫']:
                 for point_key in  ['商品特性1', '商品特性2', '商品特性3', '商品特性4', '商品特性5']:
@@ -820,22 +846,27 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                 print("是否FBM测款:", items['fields']['是否FBM测款'])
                 print("图所在NAS盘地址:", items['fields']['图所在NAS盘地址'][0]['text'])
                 print("运营团队分配:", items['fields']['运营团队分配'])
-                if '印花地毯' == glv['材质方向']:
+                if glv['材质方向'] in ['印花地毯', '印花地毯圣诞专用']:
                     title_size_list = [
                         '2X3',
                         '2X5',
                         '5X7',
                         '8X10',
                     ]
+                    if glv['材质方向'] == '印花地毯圣诞专用':
+                        title_size_list = [
+                            '2X3', '2X5', '2X6', '2X7', '2X8', '2X10',
+                            '3X5', '4X6', '5X7', '6X9', '8X10',
+                        ]
                     for s_txt in title_size_list:
-                        title_field = glv['材质方向'] + f'-商品名称{s_txt}'
-                        highlight_field = glv['材质方向'] + f'-Item Highlight {s_txt}'
-                        if title_field not in parent_item_text_info['fields']:
-                            items['fields'][f'{s_txt}的标题'] = ''
-                            items['fields'][f'{s_txt}的副标题'] = ''
-                        else:
-                            items['fields'][f'{s_txt}的标题'] = parent_item_text_info['fields'][title_field]
-                            items['fields'][f'{s_txt}的副标题'] = parent_item_text_info['fields'].get(highlight_field, [{}])[0].get('text', '') if highlight_field in parent_item_text_info['fields'] else ''
+                        title_field = f'{rug_copy_prefix}-商品名称{s_txt}'
+                        highlight_field = f'{rug_copy_prefix}-Item Highlight {s_txt}'
+                        items['fields'][f'{s_txt}的标题'] = [{
+                            'text': get_feishu_field_text(parent_item_text_info['fields'], title_field)
+                        }]
+                        items['fields'][f'{s_txt}的副标题'] = get_feishu_field_text(
+                            parent_item_text_info['fields'], highlight_field
+                        )
                         print(f"商品名称{s_txt}:", items['fields'][f'{s_txt}的标题'])
                 if '仿羊绒厨房垫' == glv['材质方向']:
                     if '仿羊绒厨房垫-Item Name 20 x32" +20 x48"' not in parent_item_text_info['fields']:
@@ -940,7 +971,7 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                             items['fields'][key_word] = [{"text": ""}]
                             skc_datas[skc][tag]['标题'] = ''
                         # 副标题来自文案库中当前父体、当前尺寸对应的
-                        # “印花地毯-Item Highlight {尺寸}”字段。上面已将其保存为
+                        # “{文案前缀}-Item Highlight {尺寸}”字段。上面已将其保存为
                         # items['fields']['{尺寸}的副标题']，这里读取该字段并替换颜色占位符。
                         subtitle_field = items['fields'].get(f'{tag}的副标题', '')
                         if isinstance(subtitle_field, list):
@@ -983,7 +1014,7 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
 
         pass
     for skc in skc_datas:
-        if '印花地毯' == skc_datas[skc]['材质方向']:
+        if skc_datas[skc]['材质方向'] in ['印花地毯', '印花地毯圣诞专用']:
             continue
         print(skc, skc, skc_datas[skc]['材质方向'])
     return skc_datas
@@ -1057,7 +1088,10 @@ def normalize_product_type(value):
 
 def build_child_seller_sku(skc, size_text, material_direction):
     """按材质方向生成子体卖家 SKU。"""
-    suffix = 'FT-SMZ-POD' if material_direction == '三明治户外垫' else 'FT-POD'
+    suffix = {
+        '三明治户外垫': 'FT-SMZ-POD',
+        '印花地毯圣诞专用': 'FT-XMAS26-POD',
+    }.get(material_direction, 'FT-POD')
     return f"{str(skc).strip()}-{str(size_text).upper()}{suffix}"
 
 def _generate_single_shop(
@@ -1088,6 +1122,15 @@ def _generate_single_shop(
     for st in guding_info:
         if 'Size' in guding_info[st]:
             guding_info[st]['商品尺寸'] = guding_info[st]['Size']
+    if material_direction == '印花地毯圣诞专用':
+        # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblxg4at2pg6lnyU&view=vewBwTjUSL
+        guding_info = get_guding_info(
+            tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblxg4at2pg6lnyU'
+        )
+        gd_dict['印花地毯圣诞专用'] = guding_info
+        for st in guding_info:
+            if 'Size' in guding_info[st]:
+                guding_info[st]['商品尺寸'] = guding_info[st]['Size']
     # 厨房垫 https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tbl18dyMkn1KS8KH&view=vew294Yp4d
     guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tbl18dyMkn1KS8KH')
     gd_dict['仿羊绒厨房垫'] = guding_info
@@ -1696,6 +1739,9 @@ def _generate_single_shop(
             else str(export_item.get('卖家 SKU') or '').strip()
         )
     output_df = pd.DataFrame(data_to_excel)
+    # 圣诞专用决定文案及固定字段来源，导出的父体、子体仍归属印花地毯。
+    if material_direction == '印花地毯圣诞专用':
+        output_df['材质方向'] = '印花地毯'
     # 历史固定表中如果仍带有“关于此艺术品”，合并到新字段后删除旧列，
     # 保证父体和子体只写入同一个 Product Description 列。
     if '关于此艺术品' in output_df.columns:

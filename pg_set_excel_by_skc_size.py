@@ -40,6 +40,8 @@ FEISHU_MISSING_IMAGE_WEBHOOK = (
     "53eda273-cc3d-4092-bfb8-01d6d5122aa5"
 )
 RUG_MATERIAL = "印花地毯"
+CHRISTMAS_RUG_MATERIAL = "印花地毯圣诞专用"
+CHRISTMAS_IMAGE_VERSION = "2026圣诞专题v1"
 KITCHEN_MAT_MATERIAL = "仿羊绒厨房垫"
 OUTDOOR_MAT_MATERIAL = "三明治户外垫"
 SUPPORTED_MATERIALS = {
@@ -764,6 +766,64 @@ def match_rug_images(
     }
 
 
+def check_christmas_skc_images(skcs, pg_config_path, sizes=None):
+    """圣诞检查使用管理站的指定版本；只读规则和图片，不生成 Excel。"""
+    with psycopg2.connect(**load_pg_config(pg_config_path)) as connection:
+        connection.set_session(readonly=True)
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '15s'")
+            cursor.execute("""
+                SELECT rules_schema_version, rules_config
+                FROM public.listing_image_versions
+                WHERE platform = %s AND material_direction = %s AND version_name = %s
+            """, ('amazon', RUG_MATERIAL, CHRISTMAS_IMAGE_VERSION))
+            rows = cursor.fetchall()
+    if len(rows) != 1:
+        raise ValueError(f"圣诞图片检查需要唯一的 Amazon / 印花地毯 / {CHRISTMAS_IMAGE_VERSION}，实际 {len(rows)} 个")
+    schema, config = rows[0]
+    if schema != 1 or not isinstance(config, dict) or not config.get('groups'):
+        raise ValueError('圣诞图片版本规则为空或结构不兼容')
+    requested_sizes = {normalize_size(size) for size in sizes} if sizes is not None else None
+    check_sizes, required = [], []
+    for group in config['groups']:
+        group_sizes = [normalize_size(size) for size in group['sizes']]
+        if requested_sizes is not None and not requested_sizes.intersection(group_sizes):
+            continue
+        check_sizes.extend(size for size in group_sizes if requested_sizes is None or size in requested_sizes)
+        for slot in IMAGE_COLUMNS:
+            rule = group['rules'][slot]
+            if rule['primary'] == '留空':
+                continue
+            names = [rule['primary'], *rule.get('alternatives', [])]
+            if not all(isinstance(name, str) and name.strip() for name in names):
+                raise ValueError(f'圣诞图片版本的 {slot} 文件名规则无效')
+            # 明细按 SKC + 所需图片名去重；同一张图被多个尺寸使用只检查一次。
+            keywords = tuple(names)
+            if keywords not in required:
+                required.append(keywords)
+    check_sizes = list(dict.fromkeys(check_sizes))
+    if not check_sizes or not required or (requested_sizes is not None and requested_sizes - set(check_sizes)):
+        raise ValueError('圣诞图片版本未完整配置要检查的尺寸或图片')
+    normalized_skcs = list(dict.fromkeys(filter(None, (normalize_text(skc) for skc in skcs))))
+    image_data = load_image_data_from_pg(normalized_skcs, pg_config_path)
+    missing_skcs, details = [], []
+    for skc in normalized_skcs:
+        frame = image_data.get(skc)
+        absent = frame is None or frame.empty
+        if absent:
+            missing_skcs.append(skc)
+        for names in required:
+            if absent or not pick_named_url(frame, *names):
+                details.append((skc, ' 或 '.join(names)))
+    return {
+        'material': CHRISTMAS_RUG_MATERIAL,
+        'checked_skcs': normalized_skcs,
+        'checked_sizes': check_sizes,
+        'missing_image_skcs': missing_skcs,
+        'missing_image_details': details,
+    }
+
+
 def check_skc_image_completeness(
     skcs: Iterable[str],
     material: str,
@@ -772,6 +832,8 @@ def check_skc_image_completeness(
 ) -> dict[str, object]:
     """不生成 Excel，直接检查一批 SKC 是否具备材质所需图片。"""
     material = normalize_text(material)
+    if material == CHRISTMAS_RUG_MATERIAL:
+        return check_christmas_skc_images(skcs, pg_config_path, sizes)
     if material not in SUPPORTED_MATERIALS:
         raise ValueError(f"不支持的材质方向：{material or '<空>'}")
 

@@ -100,6 +100,8 @@ rg "D:\\|Jolyb8Q|tbl|FEISHU_PARENT_NODE" -g "*.py" .
 python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images --no-group-notification
 python fetch_skcs_by_material.py --material-direction "仿羊绒厨房垫" --check-images --no-group-notification
 python fetch_skcs_by_material.py --material-direction "三明治户外垫" --check-images --no-group-notification
+python fetch_skcs_by_material.py --material-direction "印花地毯圣诞专用" --check-images --no-group-notification
+https://wit0jhu6kvu.feishu.cn/wiki/BeTcwtVfJidBvikXhCMcIp0MnU3?table=tbluo8xCboMg3b0T&view=vewJPF7bhh
 ```
 
 生成清单后立即检查 PostgreSQL 图片是否齐全：
@@ -117,7 +119,7 @@ D:\NAS_download\数据库无图片的SKC.txt
 D:\code\亚马逊自动上架-批量上架脚本\缺图明细.txt
 ```
 
-默认会把检查汇总和缺图明细发送到飞书群。仅关闭图片检查通知（不影响原有的 `SKCS.txt` 更新通知）：
+默认会把检查汇总和缺图明细发送到飞书群。使用以下参数关闭全部群通知（包含 `SKCS.txt` 更新通知）：
 
 ```powershell
 python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images --no-group-notification
@@ -128,10 +130,13 @@ python fetch_skcs_by_material.py --material-direction "印花地毯" --check-ima
 | 材质方向 | 飞书视图 ID |
 |---|---|
 | 印花地毯 | `vew1r9vIKo` |
+| 印花地毯圣诞专用 | `vewJPF7bhh` |
 | 仿羊绒厨房垫 | `vewyE7tvJK` |
 | 三明治户外垫 | `vew0xHeRAu` |
 
-脚本分页读取视图中的 `SKC` 字段，清理空行并按出现顺序去重，然后覆盖写入 `D:\NAS_download\SKCS.txt`（UTF-8、每行一个 SKC）。写入成功后，会向配置的飞书机器人群发送材质方向、SKC 数量、保存位置和 SKC 明细；明细过长时自动分段发送。视图没有数据时会生成空文件，并发送“0 个 SKC”的通知。
+圣诞材质的 `--check-images` 读取 `public.listing_image_versions` 中 Amazon / 印花地毯 / `2026圣诞专题v1` 的尺寸和规则，按首选与候选文件名检查，支持有无“封面图”前缀及大小写差异。该命名版本必须唯一，缺失或规则无效时停止，不覆盖原 SKCS.txt。Excel 按数据库版本填图使用下文的 `pg_v2_set_excel_by_skc_size.py --image-version`。
+
+脚本分页读取视图中的 `SKC` 字段，清理空行并按出现顺序去重，然后覆盖写入 `D:\NAS_download\SKCS.txt`（UTF-8、每行一个 SKC）。未设置 `--no-group-notification` 时，写入成功后会向配置的飞书机器人群发送材质方向、SKC 数量、保存位置和 SKC 明细；明细过长时自动分段发送。视图没有数据时会生成空文件。
 
 ### 2. 生成上架源数据
 
@@ -144,7 +149,7 @@ python module1_v2.py --material-direction "印花地毯" --skc "DT5001-V7ORANGE"
 单 SKC 模式不要求花型记录的 `父体SKU` 非空。已有父体 SKU 时仍使用原值；为空时，用花型记录的 `花型风格`、当前匹配店铺、`运营团队分配`，精确匹配父体表 `tblZOU82tgaLNhAx` 中的 `风格`、`店铺`、`团队`（人员 ID 集合）。只有唯一匹配才继续，并要求父体在五点文案表中有对应记录；无匹配、多匹配或条件缺失会明确报错，不自动回写花型表。其他筛选条件及正式模式的子表写入行为保持不变。
 
 ```powershell
-python module1_v2.py
+python module1_v2.py --material-direction "印花地毯"
 ```
 
 脚本读取 `SKCS.txt`，遍历配置的店铺，并按父体 SKU 分批生成 `output_feishu_table_data_<店铺>_<父体SKU>.xlsx`。
@@ -155,12 +160,30 @@ python module1_v2.py
 python module1_v2.py --material-direction "印花地毯"
 python module1_v2.py --material-direction "仿羊绒厨房垫"
 python module1_v2.py --material-direction "三明治户外垫"
+python module1_v2.py --material-direction "印花地毯圣诞专用"
 python module1_v2.py --material-direction "印花地毯" --skc "DT5001-V7ORANGE"
 
 python pg_set_excel_by_skc_size.py --no-feishu-notification
 ```
 
-不传 `--material-direction` 时处理全部材质。模块/RPA 调用也支持 `material_direction` 或 `材质方向` 入参。
+`--material-direction` 必须传入且不能为空。模块/RPA 调用也支持 `material_direction` 或 `材质方向` 入参。
+
+圣诞专用模式按父体的“卖家 SKU”匹配[文案库](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblYg6tDUuMAKsfT&view=vewoqs4zTj)，子体文案使用 `26年圣诞-` 前缀：
+
+| 输出内容 | 文案库字段 |
+| --- | --- |
+| 商品名称 | `26年圣诞-商品名称{尺寸}` |
+| 副标题 | `26年圣诞-Item Highlight {尺寸}` |
+| 五点描述 | `26年圣诞-商品特性1`～`26年圣诞-商品特性5` |
+| Product Description | `26年圣诞-Product Description` |
+| 搜索关键词 | `26年圣诞-搜索关键词` |
+| 设计、pattern | `26年圣诞-设计`、`26年圣诞-Pattern` |
+
+圣诞标题、副标题按 `2X3`、`2X5`、`2X6`、`2X7`、`2X8`、`2X10`、`3X5`、`4X6`、`5X7`、`6X9`、`8X10` 分别读取，实际生成尺寸取决于[圣诞固定字段表](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblxg4at2pg6lnyU&view=vewBwTjUSL)。圣诞字段缺失时不回退到普通印花地毯文案；缺少任一五点描述会报出字段名、SKC、父体 SKU 和文案记录位置。
+
+父体行文案继续来自父体表；花型查询和最终 Excel 的“材质方向”仍为 `印花地毯`。
+
+圣诞专用模式的子体 SKU 使用 `{SKC}-{尺寸}FT-XMAS26-POD`，例如 `ARB7119-SAFFRON BLOOM-2X3FT-XMAS26-POD`。新增飞书子体和 Excel 导出采用相同规则，Excel 子体“零件编号”也跟随此 SKU。
 
 `module1_v2.py` 中的 `TEST_MODE` 控制是否回写飞书子表：
 
@@ -234,6 +257,30 @@ D:\项目文件\AI自动上架\缺少图片的SKC.txt
 
 文件名匹配忽略大小写、空格，并兼容 `x/X/×` 和半角/全角加号。
 
+#### 按数据库中的已启用版本填图
+
+`pg_v2_set_excel_by_skc_size.py` 只使用数据库规则，必须通过 `--image-version`（别名 `--version-name`）选择图片版本；不传参数会直接报错。例如批量处理默认目录中的待匹配 Excel：
+
+```powershell
+python pg_v2_set_excel_by_skc_size.py --image-version "2026圣诞专题v1" --no-group-notification
+```
+
+处理单个文件：
+
+```powershell
+python pg_v2_set_excel_by_skc_size.py "D:\项目文件\AI自动上架\output_feishu_table_data_店铺_父体SKU.xlsx" --image-version "2026圣诞专题v1" --no-group-notification
+```
+
+脚本从 `pg.config` 连接数据库，查询 `public.listing_image_versions` 中 `version_name` 等于传入名称且 `is_enabled = TRUE` 的 Amazon / 印花地毯版本。按 `rules_config.groups` 中的尺寸及各目标列规则，从 `public.ods_fbm_image_upload` 为对应 SKC 匹配图片链接，写入主图、其他图和样本图列。
+
+- 每批只读取一次版本规则。版本未启用、不存在、重名或结构无效时停止，不回退到旧图片顺序。
+- Excel 的 `材质方向=印花地毯` 或 `印花地毯圣诞专用` 使用该版本；其他材质行不改图，父体无 SKC 或无尺寸的行不填图。
+- 按 `size_text` 匹配尺寸，忽略大小写、空格、乘号差异及 FT/IN 后缀；版本缺少当前文件所需尺寸时，该文件报错且不保存。
+- 图片名称和顺序完全来自数据库各目标列的 `primary`、`alternatives` 和 `type`。文件名依次匹配首选及候选名称，兼容有无“封面图”前缀；匹配不到记入缺图明细，配置留空或缺失的图片列会清掉旧链接。
+- 已删除脚本内写死的各材质图片顺序、尺寸分组、样本图别名及旧匹配回退。数据库中的 `source` 仅是历史来源信息，不再调用旧规则；拖动后按当前目标列保存的首选/候选文件名匹配。
+- 缺图明细继续按 SKC 汇总缺少的图片名称。默认发送群通知，使用 `--no-group-notification` 关闭。
+- 默认另存为 `*_尺寸图片已匹配.xlsx`；可用 `--output` 指定单文件输出，或用 `--in-place` 覆盖原文件。
+
 ### 4. 生成最终 XLSM
 
 ```powershell
@@ -290,6 +337,16 @@ python upload.py
 ```
 
 上传器会合并路径清单与输出目录中的时间戳 `.xlsm` 文件。成功记录保存在 `D:\NAS_download\uploaded_files.json`；只有路径、文件大小或修改时间发生变化时才会重新上传。
+
+## 图片版本管理网站（Flask）
+
+`image_version_manager/image_version_manager_server.py` 提供登录、管理员用户管理、操作日志，以及按 SKC 查询数据库图片和显示缩略图的页面，支持 Amazon、Wayfair、Walmart。
+
+新版通过 `image_version_manager/image_manager_versions.py` 将版本名称、启停和各尺寸图片排列保存到 PostgreSQL 的 `public.listing_image_versions`，所有登录用户共享。修改成功后即时保存，刷新或换电脑仍可读取，并发冲突会提示重做。原图片表只读；`pg_v2_set_excel_by_skc_size.py --image-version` 可按指定的已启用 Amazon / 印花地毯版本生成 Excel 图片链接。
+
+首次需 DBA 执行 `image_version_manager/sql/create_listing_image_versions.sql` 和 `image_version_manager/sql/grant_listing_image_versions.sql`，再同步发布前后端。空库需在页面确认使用默认规则或迁移本机旧配置，不会自动覆盖共享数据。
+
+运行、权限和迁移说明见 [图片管理站部署说明](image_version_manager/IMAGE_MANAGER_DEPLOYMENT.md)。共享持久化已于 2026-09-10 完成正式库建表、授权及线上发布；首次进入空库时仍需在页面确认初始化来源。
 
 ## 注意事项
 

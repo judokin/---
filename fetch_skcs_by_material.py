@@ -23,6 +23,7 @@ WEBHOOK_URL = (
 )
 
 MATERIAL_VIEWS = {
+    "印花地毯圣诞专用": "vewJPF7bhh",
     "印花地毯": "vew1r9vIKo",
     "仿羊绒厨房垫": "vewyE7tvJK",
     "三明治户外垫": "vew0xHeRAu",
@@ -225,12 +226,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--check-images",
         action="store_true",
-        help="生成 SKCS.txt 后复用 pg_set_excel_by_skc_size.py 检查图片完整性",
+        help="检查图片完整性，仅将图片齐全的 SKC 写入 SKCS.txt",
     )
     parser.add_argument(
         "--no-group-notification",
         action="store_true",
-        help="不发送图片检查结果；SKCS.txt 更新通知仍会发送",
+        help="不发送任何群通知，包括图片检查结果及 SKCS.txt 更新通知",
     )
     return parser.parse_args()
 
@@ -310,8 +311,11 @@ def main() -> None:
         write_skcs(skcs)
         print(f"已从视图 {view_id} 读取 {fetched_count} 个候选 SKC")
         print(f"已保存到：{OUTPUT_PATH}")
-        send_notifications(session, args.material_direction, skcs)
-        print("飞书群通知发送成功")
+        if not args.no_group_notification:
+            send_notifications(session, args.material_direction, skcs)
+            print("飞书群通知发送成功")
+        else:
+            print("已按参数关闭 SKCS.txt 更新群通知")
 
 
 if __name__ == "__main__":
