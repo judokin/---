@@ -644,6 +644,8 @@ def process_file(data_path):
         )
     )
     feishu_to_template_mapping.update(material_mapping_overrides)
+    # Theme 统一写入 BG；放在旧 Theme1 之后，非空 Theme 优先，空值仍保留旧字段回退。
+    feishu_to_template_mapping["Theme"] = "BG"
     print(
         f"店铺 mapping：{store_name}，"
         f"按店铺调整 {len(mapping_overrides)} 个字段，"
@@ -728,7 +730,6 @@ def process_file(data_path):
                 write_matrix[row_idx][target_col_num - 1] = final_value
 
     # 按当前店铺模板的“物流渠道代码 (US)”目标列写入固定值。
-    # 冬豚模板位于 GM，岚风、北蓉和灿东模板位于 FA。
     fulfillment_col_letter = feishu_to_template_mapping["物流渠道代码 (US)"]
     fulfillment_col_num = col_letter_to_num(fulfillment_col_letter)
     if fulfillment_col_num > max_col:
@@ -737,11 +738,17 @@ def process_file(data_path):
             row.extend([None] * (fulfillment_col_num - max_col))
         max_col = fulfillment_col_num
     fulfillment_col_idx = fulfillment_col_num - 1  # 0-based index
-    fulfillment_value = (
-        "卖家自配送（默认）"
-        if material_direction in {"仿羊绒厨房垫", "三明治户外垫"}
-        else "Fulfillment by Merchant (Default)"
-    )
+    if "灿东" in store_name:
+        fulfillment_value = "卖家自配送（默认）"
+    elif "北蓉" in store_name:
+        fulfillment_value = "Fulfillment by Merchant (Default)"
+    else:
+        # 其他店铺保持原有的按材质判断逻辑，避免改变现有生成结果。
+        fulfillment_value = (
+            "卖家自配送（默认）"
+            if material_direction in {"仿羊绒厨房垫", "三明治户外垫"}
+            else "Fulfillment by Merchant (Default)"
+        )
     for row_idx in range(rows_count):
         write_matrix[row_idx][fulfillment_col_idx] = fulfillment_value
     print(

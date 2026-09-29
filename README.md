@@ -179,7 +179,18 @@ python pg_set_excel_by_skc_size.py --no-feishu-notification
 | 搜索关键词 | `26年圣诞-搜索关键词` |
 | 设计、pattern | `26年圣诞-设计`、`26年圣诞-Pattern` |
 
-圣诞标题、副标题按 `2X3`、`2X5`、`2X6`、`2X7`、`2X8`、`2X10`、`3X5`、`4X6`、`5X7`、`6X9`、`8X10` 分别读取，实际生成尺寸取决于[圣诞固定字段表](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblxg4at2pg6lnyU&view=vewBwTjUSL)。圣诞字段缺失时不回退到普通印花地毯文案；缺少任一五点描述会报出字段名、SKC、父体 SKU 和文案记录位置。
+各材质的 `title_size_list` 从对应固定字段表中 `是否取用=是` 的 `size_text` 动态读取：
+
+| 材质方向 | 固定字段表 |
+| --- | --- |
+| 印花地毯 | [tblNqTrr56XFMxYJ](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblNqTrr56XFMxYJ&view=vewBwTjUSL) |
+| 印花地毯圣诞专用 | [tblxg4at2pg6lnyU](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblxg4at2pg6lnyU&view=vewBwTjUSL) |
+| 仿羊绒厨房垫 | [tbl18dyMkn1KS8KH](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tbl18dyMkn1KS8KH&view=vew294Yp4d) |
+| 三明治户外垫 | [tblCffxAeXGnocAY](https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblCffxAeXGnocAY&view=vewzrq6EcO) |
+
+每个店铺读取一次当前材质的固定字段，标题、副标题、子体新增和 Excel 导出共用这份尺寸数据。新增尺寸或切换“是否取用”后，下次运行自动生效，不再维护代码中的尺寸列表；花型表中的历史尺寸标题也不会额外生成子体。启用记录的 `size_text` 为空或没有任何启用尺寸时明确报错。
+
+尺寸统一为大写并去掉空格，兼容 `×`；厨房垫的 `20X32-20X48` 可匹配 `Item Name 20 x32" +20 x48"` 和对应 `Item Highlight`，新增厨房尺寸同样按尺寸后缀匹配文案。圣诞文案仍取 `26年圣诞-` 字段，缺失时不回退到普通印花地毯文案；缺少任一五点描述会报出字段名、SKC、父体 SKU 和文案记录位置。
 
 父体行文案继续来自父体表；花型查询和最终 Excel 的“材质方向”仍为 `印花地毯`。
 

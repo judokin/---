@@ -375,6 +375,12 @@ FIVE_POINTS_TABLE_URL = (
     'https://wit0jhu6kvu.feishu.cn/base/'
     f'{FIVE_POINTS_APP_TOKEN}?table={FIVE_POINTS_TABLE_TOKEN}'
 )
+FIXED_FIELDS_TABLES = {
+    '印花地毯': 'tblNqTrr56XFMxYJ',
+    '印花地毯圣诞专用': 'tblxg4at2pg6lnyU',
+    '仿羊绒厨房垫': 'tbl18dyMkn1KS8KH',
+    '三明治户外垫': 'tblCffxAeXGnocAY',
+}
 
 
 def post_feishu_search_with_retry(
@@ -569,7 +575,9 @@ def match_parent_for_single_skc(fields, parent_records, store_name):
     return parent_sku
 
 
-def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=False):
+def get_table_data(
+    material_direction=None, skcs=None, resolve_missing_parent=False, fixed_fields=None,
+):
     '''
     父类子类基础数据
     先匹配子类，再匹配父类
@@ -579,6 +587,11 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
     source_material_direction = (
         '印花地毯' if material_direction == '印花地毯圣诞专用' else material_direction
     )
+    if fixed_fields is None:
+        fixed_fields = load_material_fixed_fields(material_direction)
+    if not fixed_fields:
+        raise ValueError(f"材质 {material_direction} 的固定字段表没有可用的 size_text")
+    title_size_list = list(fixed_fields)
     skcs = list(dict.fromkeys(
         str(skc).strip() for skc in (skcs or []) if str(skc).strip()
     ))
@@ -653,41 +666,69 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
             context=f"飞书花型表查询（SKC={query_skc or '<全部>'}）",
             status_label="Status Code3:",
         )
-        #datas = []
-        for i, items in enumerate(data_json['data']['items']):
-            if len(items['fields']) == 0:
+        # 查询无结果时，明确记录本次 SKC 未匹配的筛选条件，避免只看到“未匹配 N 个”。
+        query_items = data_json.get('data', {}).get('items', [])
+        if not query_items and query_skc:
+            condition_summary = "；".join(
+                f"{condition['field_name']} {condition['operator']} {condition.get('value', [])}"
+                for condition in conditions
+            )
+            print(
+                f"SKC 未匹配：{query_skc}；店铺：{glv['gvar_shop_name']}；"
+                f"材质方向：{material_direction or '<未指定>'}；"
+                f"原因：飞书花型表查询返回 0 条，筛选条件：{condition_summary}"
+            )
+        # datas = []
+        for i, items in enumerate(query_items):
+            item_fields = items.get('fields') or {}
+            if not item_fields:
+                print(
+                    f"SKC 未匹配：{query_skc or '<全部>'}；店铺：{glv['gvar_shop_name']}；"
+                    f"原因：飞书花型表第 {i + 1} 条记录字段为空"
+                )
                 continue
             parent_item_text_info = {}
-            pskc = get_feishu_field_text(items['fields'], '父体SKU')
+            pskc = get_feishu_field_text(item_fields, '父体SKU')
             if not pskc and resolve_missing_parent:
                 if fallback_parent_records is None:
                     fallback_parent_records = get_all_table_data(
                         'Jolyb8QBoaPzj6swf0cc6bqenlf', 'tblZOU82tgaLNhAx'
                     )
                 pskc = match_parent_for_single_skc(
-                    items['fields'], fallback_parent_records, glv['gvar_shop_name']
+                    item_fields, fallback_parent_records, glv['gvar_shop_name']
                 )
             if pskc not in parent_items_dict:
                 if resolve_missing_parent:
                     raise ValueError(
                         f"SKC={query_skc}，父体={pskc} 在五点文案表中没有对应的卖家 SKU"
                     )
+                print(
+                    f"SKC 未匹配：{query_skc or get_feishu_field_text(item_fields, 'SKC') or '<未知>'}；"
+                    f"店铺：{glv['gvar_shop_name']}；父体 SKU：{pskc or '<空>'}；"
+                    f"原因：父体 SKU 不在五点文案表中"
+                )
                 continue
             parent_item_text_info = parent_items_dict[pskc]
             # import random
             # my_list = random.choice(items_list)
             five_point_texts = []
             # parent_items_dict
-            rp = items['fields']['元素'][0]['text'] if '元素' in items['fields'] else ''
+            rp = get_feishu_multiline_text(item_fields.get('元素', ''))
+            color_field = item_fields.get('颜色', '')
+            color = get_feishu_multiline_text(color_field)
             try:
-                glv['材质方向'] = items['fields']['材质方向'][0]
+                glv['材质方向'] = item_fields['材质方向'][0]
             except:
-                print('continue002材质方向为空，跳过')
-                continue
-            if material_direction and source_material_direction not in items['fields']['材质方向']:
                 print(
-                    f"材质方向不匹配，跳过：实际={glv['材质方向']}，"
-                    f"筛选={source_material_direction}"
+                    f"SKC 未匹配：{query_skc or get_feishu_field_text(item_fields, 'SKC') or '<未知>'}；"
+                    f"店铺：{glv['gvar_shop_name']}；原因：材质方向为空"
+                )
+                continue
+            if material_direction and source_material_direction not in item_fields['材质方向']:
+                print(
+                    f"SKC 未匹配：{query_skc or get_feishu_field_text(item_fields, 'SKC') or '<未知>'}；"
+                    f"店铺：{glv['gvar_shop_name']}；材质方向不匹配："
+                    f"实际={glv['材质方向']}，筛选={source_material_direction}"
                 )
                 continue
             if material_direction:
@@ -704,8 +745,10 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                 )
                 for point_key in  ['商品特性1', '商品特性2', '商品特性3', '商品特性4', '商品特性5']:
                     point_key = f'{rug_copy_prefix}-{point_key}'
-                    point_text = get_feishu_field_text(parent_item_text_info['fields'], point_key)
-                    if not point_text:
+                    point_text = get_feishu_multiline_text(
+                        parent_item_text_info['fields'].get(point_key)
+                    )
+                    if not point_text.strip():
                         error_skc = get_feishu_field_text(items['fields'], 'SKC', '花型命名') or '<空>'
                         error_message = (
                             f"飞书五点文案表第 {parent_item_text_info.get('_feishu_row_number', '<未知>')} 行缺少字段：{point_key}；"
@@ -715,7 +758,7 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                         )
                         print(error_message)
                         raise KeyError(error_message)
-                    five_point_texts.append(point_text.replace("#####", rp))
+                    five_point_texts.append(point_text)
                 product_description = get_feishu_field_text(
                     parent_item_text_info['fields'],
                     f'{rug_copy_prefix}-Product Description',
@@ -740,11 +783,10 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                 for point_key in  ['商品特性1', '商品特性2', '商品特性3', '商品特性4', '商品特性5']:
                     point_key = glv['材质方向'] + '-' + point_key
                     #print(point_key, '文案:', my_list['fields'][point_key][0]['text'])
-                    point_text = get_feishu_field_text(
-                        parent_item_text_info['fields'],
-                        point_key,
+                    point_text = get_feishu_multiline_text(
+                        parent_item_text_info['fields'].get(point_key)
                     )
-                    if not point_text:
+                    if not point_text.strip():
                         feishu_row = parent_item_text_info.get(
                             '_feishu_row_number',
                             '<未知>',
@@ -767,7 +809,7 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                         )
                         print(error_message)
                         raise KeyError(error_message)
-                    five_point_texts.append(point_text.replace("#####", rp))
+                    five_point_texts.append(point_text)
                 product_description = get_feishu_field_text(
                     parent_item_text_info['fields'],
                     glv['材质方向'] + '-Product Description',
@@ -802,7 +844,9 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                 for point_key in  ['Bullet Point1', 'Bullet Point2', 'Bullet Point3', 'Bullet Point4', 'Bullet Point5']:
                     point_key = glv['材质方向'] + '-' + point_key
                     #print(point_key, '文案:', my_list['fields'][point_key][0]['text'])
-                    five_point_texts.append(parent_item_text_info['fields'][point_key][0]['text'].replace("#####", rp))
+                    five_point_texts.append(get_feishu_multiline_text(
+                        parent_item_text_info['fields'][point_key]
+                    ))
                 product_description = get_feishu_field_text(
                     parent_item_text_info['fields'],
                     '仿羊绒厨房垫-Product Description',
@@ -819,6 +863,10 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                     '仿羊绒厨房垫-设计'
                 )
                 pass
+            # 产品详情中的占位符也按当前 SKC 替换；四个井号与五个井号含义不同。
+            product_description = replace_product_description_placeholders(
+                product_description, color, rp
+            )
             skc = items['fields']['SKC'][0]['text'] if 'SKC' in items['fields'] else ''
             if '' == skc:
                 skc = items['fields']['花型命名'][0]['text'] if '花型命名' in items['fields'] else ''
@@ -846,65 +894,19 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                 print("是否FBM测款:", items['fields']['是否FBM测款'])
                 print("图所在NAS盘地址:", items['fields']['图所在NAS盘地址'][0]['text'])
                 print("运营团队分配:", items['fields']['运营团队分配'])
-                if glv['材质方向'] in ['印花地毯', '印花地毯圣诞专用']:
-                    title_size_list = [
-                        '2X3',
-                        '2X5',
-                        '5X7',
-                        '8X10',
-                    ]
-                    if glv['材质方向'] == '印花地毯圣诞专用':
-                        title_size_list = [
-                            '2X3', '2X5', '2X6', '2X7', '2X8', '2X10',
-                            '3X5', '4X6', '5X7', '6X9', '8X10',
-                        ]
-                    for s_txt in title_size_list:
-                        title_field = f'{rug_copy_prefix}-商品名称{s_txt}'
-                        highlight_field = f'{rug_copy_prefix}-Item Highlight {s_txt}'
-                        items['fields'][f'{s_txt}的标题'] = [{
-                            'text': get_feishu_field_text(parent_item_text_info['fields'], title_field)
-                        }]
-                        items['fields'][f'{s_txt}的副标题'] = get_feishu_field_text(
-                            parent_item_text_info['fields'], highlight_field
-                        )
-                        print(f"商品名称{s_txt}:", items['fields'][f'{s_txt}的标题'])
-                if '仿羊绒厨房垫' == glv['材质方向']:
-                    if '仿羊绒厨房垫-Item Name 20 x32" +20 x48"' not in parent_item_text_info['fields']:
-                        items['fields'][f'20X32-20X48的标题'] = ''
-                    else:
-                        items['fields'][f'20X32-20X48的标题']= parent_item_text_info['fields']['仿羊绒厨房垫-Item Name 20 x32" +20 x48"']
-                    items['fields'][f'20X32-20X48的副标题'] = get_feishu_field_text(
-                        parent_item_text_info['fields'],
-                        '仿羊绒厨房垫-Item Highlight 20 x32" +20 x48"'
+                copy_prefix = '26年圣诞' if glv['材质方向'] == '印花地毯圣诞专用' else glv['材质方向']
+                title_prefix = copy_prefix + (
+                    '-Item Name ' if glv['材质方向'] == '仿羊绒厨房垫' else '-商品名称'
+                )
+                for s_txt in title_size_list:
+                    items['fields'][f'{s_txt}的标题'] = [{
+                        'text': get_sized_copy_text(parent_item_text_info['fields'], title_prefix, s_txt)
+                    }]
+                    items['fields'][f'{s_txt}的副标题'] = get_sized_copy_text(
+                        parent_item_text_info['fields'], f'{copy_prefix}-Item Highlight ', s_txt
                     )
-                    print(
-                        "商品名称20X32-20X48:",
-                        items['fields']['20X32-20X48的标题']
-                    )
-                if '三明治户外垫' == glv['材质方向']:
-                    title_size_list = [
-                        '2X3',
-                        '2.5X8',
-                        '3X5',
-                        '5X7',
-                        '5X8',
-                        '6X9',
-                        '8X10',
-                        '9X12',
-                    ]
-                    for s_txt in title_size_list:
-                        title_field = glv['材质方向'] + f'-商品名称{s_txt}'
-                        highlight_field = glv['材质方向'] + f'-Item Highlight {s_txt}'
-                        if title_field not in parent_item_text_info['fields']:
-                            items['fields'][f'{s_txt}的标题'] = ''
-                        else:
-                            items['fields'][f'{s_txt}的标题'] = parent_item_text_info['fields'][title_field]
-                        items['fields'][f'{s_txt}的副标题'] = get_feishu_field_text(
-                            parent_item_text_info['fields'],
-                            highlight_field,
-                        )
-                        print(f"商品名称{s_txt}:", items['fields'][f'{s_txt}的标题'])
-                        print(f"Item Highlight {s_txt}:", items['fields'][f'{s_txt}的副标题'])
+                    print(f"商品名称{s_txt}:", items['fields'][f'{s_txt}的标题'])
+                    print(f"Item Highlight {s_txt}:", items['fields'][f'{s_txt}的副标题'])
                 
                 if '北美FBM' not in items['fields']['是否FBM测款'] and 'Amazon-US-FBM' not in items['fields']['是否FBM测款']:
                     print('continue004')
@@ -931,6 +933,7 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                 skc_datas[skc]['风格'] = items['fields']['花型风格']
                 skc_datas[skc]['FBM上架店铺'] = items['fields']['FBM上架店铺']
                 skc_datas[skc]['record_id'] = items['record_id']
+                skc_datas[skc]['元素'] = rp
                 #import pdb;pdb.set_trace()
 
                 skc_datas[skc]['运营团队'] = []
@@ -942,19 +945,13 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                     for td in items['fields']['对应运营']:
                         skc_datas[skc]['对应运营'].append({"id": td['id']})
                         break
-                for key_word in items['fields']:
+                # 只处理固定字段表启用的尺寸，避免混入花型表中的历史标题列。
+                for key_word in (f'{size}的标题' for size in title_size_list):
                     if "的标题" in key_word:
                         #print(key_word)
                         tag = key_word.split("的")[0]
                         print("\n\n\n")
                         skc_datas[skc][tag] = {}
-                        color_field = items['fields'].get('颜色', '')
-                        if isinstance(color_field, list):
-                            color = color_field[0].get('text', '') if color_field else ''
-                        elif isinstance(color_field, dict):
-                            color = color_field.get('text', '')
-                        else:
-                            color = color_field or ''
                         try:
                             # 标题文案同时兼容颜色和花型占位符。
                             skc_datas[skc][tag]['标题'] = items['fields'][key_word][0]['text']
@@ -996,12 +993,14 @@ def get_table_data(material_direction=None, skcs=None, resolve_missing_parent=Fa
                             pass
                         print(tag, '标题:', items['fields'][key_word][0]['text'])
                         skc_datas[skc][tag]['图所在NAS盘地址'] = items['fields']['图所在NAS盘地址'][0]['text'] if '图所在NAS盘地址' in items['fields'] else ''
-                        skc_datas[skc][tag]['颜色'] = ''
-                        if '颜色' in items['fields']:
-                            skc_datas[skc][tag]['颜色'] = items['fields']['颜色'][0]['text']
+                        skc_datas[skc][tag]['颜色'] = color
                         for index, five_point_text in enumerate(five_point_texts):
-                            skc_datas[skc][tag][f'文案{index+1}'] = five_point_text
-                            print(tag, f'文案{index+1}:', five_point_text)
+                            # 所有材质的五点统一替换，并保留多行及全部富文本内容。
+                            rendered_point = replace_product_feature_placeholders(
+                                five_point_text, color, rp
+                            )
+                            skc_datas[skc][tag][f'文案{index+1}'] = rendered_point
+                            print(tag, f'文案{index+1}:', rendered_point)
                         skc_datas[skc][tag]['Product Description'] = product_description
                         skc_datas[skc][tag]['搜索关键词'] = 搜索关键词
                         skc_datas[skc][tag]['设计'] = 设计
@@ -1027,16 +1026,28 @@ def get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblTer6BHOZRAQkB'):
     guding_list = get_all_table_data(tk1, tk2)
     guding_info = {}
     for guding_index, guding_item in enumerate(guding_list):
-        if not ('是否取用' in guding_item['fields'] and guding_item['fields']['是否取用'] == '是'):
+        if get_feishu_field_text(guding_item['fields'], '是否取用') != '是':
             continue
-        size_text = guding_item['fields']['size_text'][0]['text'].upper()
+        size_text = normalize_fixed_size(get_feishu_field_text(guding_item['fields'], 'size_text'))
+        if not size_text:
+            raise ValueError(
+                f"固定字段表 {tk2} 第 {guding_index + 1} 条记录已取用但 size_text 为空；"
+                f"记录 ID：{guding_item.get('record_id', '<未知>')}"
+            )
         guding_info[size_text] = {}
         for field_key in guding_item['fields']:
+            if field_key in ('Care Instructions1', 'Care Instructions2'):
+                # 多行富文本可能拆成多个片段，不能只读取第一段。
+                guding_info[size_text][field_key] = get_feishu_multiline_text(
+                    guding_item['fields'][field_key]
+                )
+                continue
             try:
                 guding_info[size_text][field_key] = guding_item['fields'][field_key][0]['text']
             except:
                 guding_info[size_text][field_key] = guding_item['fields'][field_key]
         print(shop_brands)
+        guding_info[size_text]['size_text'] = size_text
         guding_info[size_text]['品牌'] = shop_brands[glv['gvar_shop_name']]['品牌']
         guding_info[size_text]['制造商'] = shop_brands[glv['gvar_shop_name']]['制造商']
     return guding_info
@@ -1057,6 +1068,41 @@ def trim_text(text, words_list):
         #text = text.replace(word, '')
         text = re.sub(word, "", text, flags=re.IGNORECASE)
     return text
+
+def get_feishu_multiline_text(value):
+    """拼接全部富文本片段，保留原始换行及空格，不额外插入分隔符。"""
+    if isinstance(value, list):
+        return ''.join(get_feishu_multiline_text(part) for part in value)
+    if isinstance(value, dict):
+        return get_feishu_multiline_text(value.get('text', value.get('name', '')))
+    return '' if value is None else str(value)
+
+
+def replace_product_feature_placeholders(text, color, element):
+    """替换五点中的颜色、元素占位符，替换值按原文插入且不做二次替换。"""
+    replacements = {
+        '##颜色##': get_feishu_multiline_text(color),
+        '#####': get_feishu_multiline_text(element),
+    }
+    return re.sub(
+        r'##颜色##|#####',
+        lambda match: replacements[match.group(0)],
+        get_feishu_multiline_text(text),
+    )
+
+
+def replace_product_description_placeholders(text, color, element):
+    """替换产品详情中的颜色和元素占位符，四个井号不匹配五个井号。"""
+    replacements = {
+        '##颜色##': get_feishu_multiline_text(color),
+        '####': get_feishu_multiline_text(element),
+    }
+    return re.sub(
+        r'##颜色##|(?<!#)####(?!#)',
+        lambda match: replacements[match.group(0)],
+        get_feishu_multiline_text(text),
+    )
+
 
 def get_feishu_field_text(fields, *field_names):
     """按候选字段名读取飞书字段，兼容富文本列表、字典和普通字符串。"""
@@ -1086,6 +1132,50 @@ def normalize_product_type(value):
         return ''
     return str(value).strip().upper()
 
+
+def normalize_fixed_size(value):
+    """统一固定尺寸及文案字段尺寸后缀，兼容厨房垫的引号和组合尺寸。"""
+    return (
+        re.sub(r'\s+', '', str(value or '')).upper()
+        .replace('×', 'X')
+        .replace('＋', '-')
+        .replace('+', '-')
+        .replace('"', '')
+        .replace('＂', '')
+    )
+
+
+def get_sized_copy_text(fields, field_prefix, size_text):
+    """按固定表的尺寸读取文案，尺寸写法差异不改变输出 size_text。"""
+    exact_field = f'{field_prefix}{size_text}'
+    text = get_feishu_field_text(fields, exact_field)
+    if text:
+        return text
+    normalized_size = normalize_fixed_size(size_text)
+    for field_name in fields:
+        if (field_name.startswith(field_prefix)
+                and normalize_fixed_size(field_name[len(field_prefix):]) == normalized_size):
+            text = get_feishu_field_text(fields, field_name)
+            if text:
+                return text
+    return ''
+
+
+def load_material_fixed_fields(material_direction):
+    """按材质读取取用中的固定字段，标题和子体生成共用同一尺寸集合。"""
+    material_direction = str(material_direction or '').strip()
+    table_id = FIXED_FIELDS_TABLES.get(material_direction)
+    if not table_id:
+        raise ValueError(f"未配置材质对应的固定字段表：{material_direction or '<空>'}")
+    fixed_fields = get_guding_info(tk1=FIVE_POINTS_APP_TOKEN, tk2=table_id)
+    if not fixed_fields:
+        raise ValueError(f"材质 {material_direction} 的固定字段表 {table_id} 没有是否取用=是的 size_text")
+    for fields in fixed_fields.values():
+        if 'Size' in fields:
+            fields['商品尺寸'] = fields['Size']
+    return fixed_fields
+
+
 def build_child_seller_sku(skc, size_text, material_direction):
     """按材质方向生成子体卖家 SKU。"""
     suffix = {
@@ -1100,6 +1190,7 @@ def _generate_single_shop(
     target_pskc=None,
     preloaded_skc_datas=None,
     material_direction=None,
+    fixed_fields=None,
 ):
     material_direction = str(material_direction or '').strip()
     skcs = list(dict.fromkeys(
@@ -1109,40 +1200,17 @@ def _generate_single_shop(
         raise ValueError("材质方向不能为空")
     dir_path = r"D:\项目文件\AI自动上架\\"
     nas_dir_path = r"D:\NAS_download\\"
+    fixed_fields = copy.deepcopy(
+        fixed_fields if fixed_fields is not None else load_material_fixed_fields(material_direction)
+    )
+    if not fixed_fields:
+        raise ValueError(f"材质 {material_direction} 的固定字段表没有可用的 size_text")
     skc_datas = copy.deepcopy(
         preloaded_skc_datas
         if preloaded_skc_datas is not None
-        else get_table_data(material_direction=material_direction, skcs=skcs)
+        else get_table_data(material_direction=material_direction, skcs=skcs, fixed_fields=fixed_fields)
     )
-    gd_dict = {}
-    # guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblTer6BHOZRAQkB')
-    # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblNqTrr56XFMxYJ&view=vewBwTjUSL
-    guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblNqTrr56XFMxYJ')
-    gd_dict['印花地毯'] = guding_info
-    for st in guding_info:
-        if 'Size' in guding_info[st]:
-            guding_info[st]['商品尺寸'] = guding_info[st]['Size']
-    if material_direction == '印花地毯圣诞专用':
-        # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblxg4at2pg6lnyU&view=vewBwTjUSL
-        guding_info = get_guding_info(
-            tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblxg4at2pg6lnyU'
-        )
-        gd_dict['印花地毯圣诞专用'] = guding_info
-        for st in guding_info:
-            if 'Size' in guding_info[st]:
-                guding_info[st]['商品尺寸'] = guding_info[st]['Size']
-    # 厨房垫 https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tbl18dyMkn1KS8KH&view=vew294Yp4d
-    guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tbl18dyMkn1KS8KH')
-    gd_dict['仿羊绒厨房垫'] = guding_info
-    for st in guding_info:
-        if 'Size' in guding_info[st]:
-            guding_info[st]['商品尺寸'] = guding_info[st]['Size']
-    # 三明治 https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblCffxAeXGnocAY&view=vewzrq6EcO
-    guding_info = get_guding_info(tk1='Jolyb8QBoaPzj6swf0cc6bqenlf', tk2='tblCffxAeXGnocAY')
-    gd_dict['三明治户外垫'] = guding_info
-    for st in guding_info:
-        if 'Size' in guding_info[st]:
-            guding_info[st]['商品尺寸'] = guding_info[st]['Size']
+    gd_dict = {material_direction: fixed_fields}
     try:
         # https://wit0jhu6kvu.feishu.cn/base/Jolyb8QBoaPzj6swf0cc6bqenlf?table=tblMsoJKlpVM7iNJ&view=vew9NA2BTM
         w_list = []
@@ -1328,16 +1396,16 @@ def _generate_single_shop(
             simulated_record['record_id'] = f"test_{simulated_index}"
             fields = simulated_record['fields']
             size_text = str(fields['size_text']).upper()
-            fixed_fields = copy.deepcopy(
+            simulated_fixed_fields = copy.deepcopy(
                 gd_dict[fields['材质方向']].get(size_text, {})
             )
-            fixed_fields.update(fields)
-            fixed_fields['SKC'] = [{'text': fields['SKC']}]
-            fixed_fields['size_text'] = [{'text': size_text}]
-            fixed_fields['商品尺寸'] = [{
+            simulated_fixed_fields.update(fields)
+            simulated_fixed_fields['SKC'] = [{'text': fields['SKC']}]
+            simulated_fixed_fields['size_text'] = [{'text': size_text}]
+            simulated_fixed_fields['商品尺寸'] = [{
                 'text': str(fields.get('商品尺寸', size_text))
             }]
-            simulated_record['fields'] = fixed_fields
+            simulated_record['fields'] = simulated_fixed_fields
             simulated_children.append(simulated_record)
         chrildren_list = chrildren_list + simulated_children
     else:
@@ -1587,6 +1655,12 @@ def _generate_single_shop(
         parent_data_item['产品类型关键字'] = get_feishu_field_text(parent_fields, '产品类型关键字')
         parent_data_item['制造商'] = get_feishu_field_text(parent_fields, '制造商', 'Manufacturer')
         parent_data_item['卖家 SKU'] = parent_sku
+        # v2 模板 P 列映射“型号”。父体记录没有该字段时，用父体 SKU 作为型号，
+        # 避免父体行在导入模板后 P 列为空。
+        parent_data_item['型号'] = (
+            get_feishu_field_text(parent_fields, '型号', 'Model Name')
+            or parent_sku
+        )
         parent_data_item['品牌'] = get_feishu_field_text(parent_fields, '品牌', 'Brand Name')
         parent_data_item['商品信息操作'] = get_feishu_field_text(parent_fields, '商品信息操作', '更新删除')
         parent_data_item['父条目的等级'] = get_feishu_field_text(parent_fields, '父条目的等级')
@@ -1604,6 +1678,24 @@ def _generate_single_shop(
         parent_data_item['Product Description'] = get_feishu_field_text(
             parent_fields, 'Product Description', '关于此艺术品'
         ) or f"GENIMO {parent_data_item.get('品牌', 'Rugs')} - Premium Quality Washable Area Rug"
+        # 父体文案也使用该父体批次首个 SKC 的颜色和元素替换占位符。
+        parent_render_color = ''
+        parent_render_element = ''
+        for batch_skc, batch_data in skc_datas.items():
+            if batch_data.get('pskc') != first_pskc:
+                continue
+            parent_render_element = batch_data.get('元素', '')
+            for batch_size, batch_size_data in batch_data.items():
+                if isinstance(batch_size_data, dict):
+                    parent_render_color = batch_size_data.get('颜色', '')
+                    break
+            if parent_render_color or parent_render_element:
+                break
+        parent_data_item['Product Description'] = replace_product_description_placeholders(
+            parent_data_item['Product Description'],
+            parent_render_color,
+            parent_render_element,
+        )
         parent_data_item['Manufacturer'] = get_feishu_field_text(
             parent_fields, 'Manufacturer', '制造商'
         ) or 'GENIMO'
@@ -1855,10 +1947,13 @@ def m(test_mode=None, material_direction=None, skc=None):
                 f"\n========== 店铺 [{shop_index}/{len(shop_name_list)}]："
                 f"{shop_name} =========="
             )
+            # 每店只读取一次当前材质的固定字段，所有父体批次复用这份尺寸快照。
+            fixed_fields = load_material_fixed_fields(material_direction)
             shop_skc_datas = get_table_data(
                 material_direction=material_direction,
                 skcs=skcs,
                 resolve_missing_parent=single_skc is not None,
+                fixed_fields=fixed_fields,
             )
             matched_skcs = [skc for skc in skcs if skc in shop_skc_datas]
             parent_batches = {}
@@ -1885,6 +1980,7 @@ def m(test_mode=None, material_direction=None, skc=None):
                         target_pskc=parent_sku,
                         preloaded_skc_datas=shop_skc_datas,
                         material_direction=material_direction,
+                        fixed_fields=fixed_fields,
                     )
                 except Exception as exc:
                     failed_batches.append((shop_name, parent_sku, str(exc)))
