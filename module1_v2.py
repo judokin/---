@@ -1591,7 +1591,10 @@ def _generate_single_shop(
                         )
                         datas[size_text]['标题'] = trim_text(datas[size_text]['标题'], words_list[0]['fields']['违禁词列表'][0]['text'].split(","))
                         data_item["商品名称"] = datas[size_text]['标题']
-                        data_item["副标题"] = datas[size_text]['副标题']
+                        data_item["副标题"] = trim_text(
+                            datas[size_text]['副标题'],
+                            words_list[0]['fields']['违禁词列表'][0]['text'].split(",")
+                        )
                         data_item["颜色"] = trim_text(datas[size_text]['颜色'], words_list[0]['fields']['违禁词列表'][0]['text'].split(","))
                         # data_item["色表"] = trim_text(datas[size_text]['色表'], words_list[0]['fields']['违禁词列表'][0]['text'].split(","))
                         data_item["商品特性"] = trim_text(datas[size_text]['文案1'], words_list[0]['fields']['违禁词列表'][0]['text'].split(","))
@@ -1608,7 +1611,10 @@ def _generate_single_shop(
                             or data_item.get('商品类型')
                         )
                         data_item["FBM上架店铺"] = datas['FBM上架店铺']
-                        data_item["Product Description"] = datas[size_text]['Product Description']
+                        data_item["Product Description"] = trim_text(
+                            datas[size_text]['Product Description'],
+                            words_list[0]['fields']['违禁词列表'][0]['text'].split(",")
+                        )
                         data_item["设计"] = datas[size_text]['设计']
                         data_item["材质方向"] = skc_datas[skc]['材质方向']
                         # pattern 保存在当前尺寸节点，而不是 SKC 顶层。
@@ -1673,7 +1679,10 @@ def _generate_single_shop(
             parent_fields, '商品编码类型', '商品编号类型'
         )
         parent_data_item['父子关系'] = get_feishu_field_text(parent_fields, '父子关系')
-        parent_data_item['副标题'] = get_feishu_field_text(parent_fields, 'Item Highlight', '副标题')
+        parent_data_item['副标题'] = trim_text(
+            get_feishu_field_text(parent_fields, 'Item Highlight', '副标题'),
+            words_list[0]['fields']['违禁词列表'][0]['text'].split(",")
+        )
         parent_data_item['色表'] = ''
         parent_data_item['Product Description'] = get_feishu_field_text(
             parent_fields, 'Product Description', '关于此艺术品'
@@ -1695,6 +1704,10 @@ def _generate_single_shop(
             parent_data_item['Product Description'],
             parent_render_color,
             parent_render_element,
+        )
+        parent_data_item['Product Description'] = trim_text(
+            parent_data_item['Product Description'],
+            words_list[0]['fields']['违禁词列表'][0]['text'].split(",")
         )
         parent_data_item['Manufacturer'] = get_feishu_field_text(
             parent_fields, 'Manufacturer', '制造商'
