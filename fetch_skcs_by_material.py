@@ -228,6 +228,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="检查图片完整性，仅将图片齐全的 SKC 写入 SKCS.txt",
     )
+    parser.add_argument('--image-version', help='指定数据库中已启用的 Amazon 图片版本；省略时使用该材质唯一启用版本')
     parser.add_argument(
         "--no-group-notification",
         action="store_true",
@@ -240,6 +241,7 @@ def check_images(
     material_direction: str,
     skcs: list[str],
     notify: bool,
+    image_version: str | None = None,
 ) -> dict[str, object]:
     """复用 PostgreSQL 图片匹配规则，检查当前 SKC 清单的图片完整性。"""
     from pg_set_excel_by_skc_size import (
@@ -254,6 +256,7 @@ def check_images(
         skcs,
         material_direction,
         DEFAULT_PG_CONFIG_PATH,
+        image_version=image_version,
     )
     detail_lines = save_image_check_reports(
         result,
@@ -297,6 +300,7 @@ def main() -> None:
             args.material_direction,
             skcs,
             notify=not args.no_group_notification,
+            image_version=args.image_version,
         )
         incomplete_skcs = {
             skc for skc, _required_image in check_result["missing_image_details"]

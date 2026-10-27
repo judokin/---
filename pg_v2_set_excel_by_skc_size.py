@@ -13,6 +13,7 @@ r"""从 PostgreSQL 读取已启用图片版本，按 SKC 和尺寸填入上架�
 from __future__ import annotations
 
 import argparse
+import re
 from contextlib import closing
 import json
 from pathlib import Path
@@ -157,72 +158,38 @@ def decoded_image_name(url: object, fallback_name: object) -> str:
     return normalize_text(fallback_name)
 
 
-def load_image_data_from_pg(
-    skcs: list[str],
-    config_path: Path,
-) -> dict[str, pd.DataFrame]:
-    """读取目标 SKC 的可用图片，只还原文件名，不推断图片类型或内置顺序。"""
-    if not skcs:
-        return {}
-
-    query = """
-        SELECT skc, file_name, url
-        FROM public.ods_fbm_image_upload
-        WHERE skc = ANY(%s)
-          AND status = 'success'
-          AND COALESCE(url, '') <> ''
-          AND (url_expire_at IS NULL OR url_expire_at > NOW())
-        ORDER BY skc, id
-    """
-    with closing(psycopg2.connect(**load_pg_config(config_path))) as connection:
-        connection.set_session(readonly=True)
-        with connection.cursor() as cursor:
-            cursor.execute("SET LOCAL statement_timeout = '15s'")
-            cursor.execute(query, (skcs,))
-            rows = cursor.fetchall()
-
-    records = [
-        {
-            "SKC": normalize_text(skc),
-            "文件名": decoded_image_name(url, file_name),
-            "图片地址": normalize_text(url),
-        }
-        for skc, file_name, url in rows
-    ]
-    if not records:
-        return {}
-    image_df = pd.DataFrame(records)
-    return {
-        skc: group.reset_index(drop=True)
-        for skc, group in image_df.groupby("SKC", sort=False)
-    }
+def load_image_data_from_pg(skcs, pg_config_path=DEFAULT_PG_CONFIG_PATH):
+    """共用包含尺寸、图片类型及链接有效期筛选的数据库读取。"""
+    from pg_set_excel_by_skc_size import load_image_data_from_pg as load_images
+    return load_images(skcs, pg_config_path)
 
 
 def load_enabled_image_version(
-    version_name: str,
+    version_name: str | None = None,
     pg_config_path: Path = DEFAULT_PG_CONFIG_PATH,
+    material_direction: str | None = None,
 ) -> dict[str, object]:
-    """读取唯一启用的 Amazon 印花地毯版本；一次批处理使用同一规则快照。"""
+    """按可选名称、材质读取唯一启用的 Amazon 版本。"""
     version_name = normalize_text(version_name)
-    if not version_name:
-        raise ValueError("图片版本名称不能为空")
+    if material_direction == CHRISTMAS_RUG_MATERIAL:
+        material_direction = RUG_MATERIAL
     with closing(psycopg2.connect(**load_pg_config(pg_config_path))) as connection:
         connection.set_session(readonly=True)
         with connection.cursor() as cursor:
             cursor.execute("SET LOCAL statement_timeout = '15s'")
             cursor.execute("""
-                SELECT rules_schema_version, rules_config
+                SELECT rules_schema_version, rules_config, version_name, material_direction
                 FROM public.listing_image_versions
-                WHERE version_name = %s AND is_enabled = TRUE
-                  AND platform = %s AND material_direction = %s
-            """, (version_name, 'amazon', RUG_MATERIAL))
+                WHERE (%s = '' OR version_name = %s) AND is_enabled = TRUE
+                  AND platform = %s AND (%s IS NULL OR material_direction = %s)
+            """, (version_name, version_name, 'amazon', material_direction, material_direction))
             rows = cursor.fetchall()
     if len(rows) != 1:
         raise ValueError(
-            f"需要唯一的已启用 Amazon / {RUG_MATERIAL} / {version_name} 图片版本，"
+            f"需要唯一的已启用 Amazon / {material_direction or '指定材质'} / {version_name or '自动选择'} 图片版本，"
             f"实际找到 {len(rows)} 个；请检查版本名称和启用状态"
         )
-    schema, config = rows[0]
+    schema, config, version_name, material_direction = rows[0]
     if (schema != 1 or not isinstance(config, dict)
             or config.get('slot_order') != IMAGE_COLUMNS
             or not isinstance(config.get('groups'), list) or not config['groups']):
@@ -251,7 +218,7 @@ def load_enabled_image_version(
     return {
         'version_name': version_name,
         'platform': 'amazon',
-        'material_direction': RUG_MATERIAL,
+        'material_direction': material_direction,
         'rules_by_size': rules_by_size,
     }
 
@@ -259,6 +226,7 @@ def load_enabled_image_version(
 def version_image_values(
     image_df: pd.DataFrame | None,
     rules: dict[str, dict],
+    size: str = '',
 ) -> tuple[dict[str, str], dict[str, str]]:
     """完全按数据库目标列的名称规则取图；source 历史信息不参与匹配。"""
     values = dict.fromkeys(IMAGE_COLUMNS, '')
@@ -277,12 +245,37 @@ def version_image_values(
         if not has_images:
             continue
         for name in names:
+            if rule['type'].strip() == '尺寸+类型' or '样本图片' in name:
+                descriptor = name.replace('当前尺寸', size)
+                sizes = [normalize_size(v) for v in re.findall(r'\d+(?:\.\d+)?\s*[xX×]\s*\d+(?:\.\d+)?', descriptor)]
+                if '特殊' in descriptor:
+                    sizes.append('特殊')
+                kind = next((k for k in ('样本图片', '其他图片', '主图片', '白底图') if k in descriptor), None)
+                if kind and sizes and {'尺寸', '图片类型'}.issubset(image_df.columns):
+                    matched = image_df[image_df['尺寸'].map(normalize_size).isin(sizes) & image_df['图片类型'].eq(kind)]
+                    ordinal = re.search(re.escape(kind) + r'\s*(\d+)', descriptor)
+                    index = max(0, int(ordinal.group(1)) - 1) if ordinal else 0
+                    if len(matched) > index:
+                        values[slot] = first_url(matched.iloc[index:index+1])
+                    if values[slot]:
+                        break
+                    continue
             keyword = normalize_image_name(name).replace('封面图', '')
             if keyword:
                 values[slot] = first_url(image_df[normalized_names.str.contains(keyword, regex=False)])
             if values[slot]:
                 break
     return values, required_names
+
+
+def rules_for_size(version, size):
+    """只从版本取得精确或数据库明确配置的通配尺寸规则。"""
+    rules = version['rules_by_size']
+    normalized = normalize_size(size)
+    for key in (normalized, '全部尺寸', '其他'):
+        if key in rules:
+            return rules[key]
+    raise ValueError(f"图片版本 {version['version_name']} 未配置尺寸：{size}")
 
 
 def match_rug_images(
@@ -335,7 +328,7 @@ def match_rug_images(
             continue
         unknown_sizes = sorted({
             normalize_size(size) for size in sized_rows['size_text']
-            if normalize_size(size) not in image_version['rules_by_size']
+            if normalize_size(size) not in image_version['rules_by_size'] and not {'全部尺寸', '其他'}.intersection(image_version['rules_by_size'])
         })
         if unknown_sizes:
             raise ValueError(
@@ -353,7 +346,7 @@ def match_rug_images(
         for row_index in skc_rows.index:
             size = normalize_size(target_df.at[row_index, 'size_text'])
             values, required_names = version_image_values(
-                image_df, image_version['rules_by_size'][size]
+                image_df, rules_for_size(image_version, size), size
             )
             # 清掉旧版本链接，包括配置留空和当前缺失的图片。
             target_df.loc[row_index, IMAGE_COLUMNS] = ''
@@ -394,6 +387,7 @@ def parse_args() -> argparse.Namespace:
             "不传时批量扫描默认目录"
         ),
     )
+    parser.add_argument('--material-direction', help='可选材质，用于区分不同材质的同名版本')
     parser.add_argument(
         "--image-version", "--version-name",
         dest="image_version",
@@ -541,7 +535,7 @@ def main() -> None:
         )
         return
 
-    image_version = load_enabled_image_version(args.image_version, args.pg_config)
+    image_version = load_enabled_image_version(args.image_version, args.pg_config, args.material_direction)
     print(
         f"使用已启用图片版本：{image_version['version_name']}，"
         f"平台：{image_version['platform']}，材质：{image_version['material_direction']}，"

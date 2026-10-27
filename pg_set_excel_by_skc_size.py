@@ -50,12 +50,7 @@ SUPPORTED_MATERIALS = {
     OUTDOOR_MAT_MATERIAL,
 }
 
-# 仅凭 SKC 检查图片时使用的标准产品尺寸。Excel 匹配模式仍以 size_text 为准。
-DEFAULT_IMAGE_CHECK_SIZES = {
-    RUG_MATERIAL: ("2X3", "2X5", "5X7", "8X10"),
-    KITCHEN_MAT_MATERIAL: ("固定图片顺序",),
-    OUTDOOR_MAT_MATERIAL: ("2.5X8", "3X5", "5X7", "6X9", "8X10", "9X12"),
-}
+# 尺寸及图片规则统一读取 public.listing_image_versions，不在此处预设。
 
 IMAGE_COLUMNS = [
     "主图片 URL",
@@ -70,17 +65,6 @@ IMAGE_COLUMNS = [
     "样本图片 URL",
 ]
 
-KITCHEN_MAT_IMAGE_NAMES = {
-    "主图片 URL": "20X32+20X48厨房垫",
-    "其他图片 URL1": (
-        "封面图2X5厨房 / 2X5厨房 / 2X6厨房 / 封面图2X6厨房（四选一）"
-    ),
-    "其他图片 URL2": "封面图2X3门口 / 2X3门口",
-    "其他图片 URL3": "2X5走廊",
-    "其他图片 URL4": "120X170单椅",
-    "其他图片 URL5": "2X5尺寸白底图 / 白底图2X5 / 2X5白底图",
-    "样本图片 URL": "样本图片 / SWATCH / SWACH / SWITCH / SWICH",
-}
 
 def normalize_text(value: object) -> str:
     """把 Excel 值转换为去除首尾空格的字符串。"""
@@ -186,167 +170,10 @@ def pick_sample_url(image_df: pd.DataFrame) -> str:
     return pick_named_url(image_df, "SWATCH", "SWACH", "SWITCH", "SWICH")
 
 
-def kitchen_mat_image_values(image_df: pd.DataFrame) -> dict[str, str]:
-    """按文件名给仿羊绒厨房垫匹配固定顺序的图片 URL。"""
-    required_columns = {"文件名", "图片地址"}
-    missing_columns = sorted(required_columns - set(image_df.columns))
-    if missing_columns:
-        raise ValueError(f"图片数据文件缺少字段：{missing_columns}")
-
-    return {
-        "主图片 URL": pick_named_url(image_df, "20X32+20X48厨房垫"),
-        "其他图片 URL1": pick_named_url(
-            image_df,
-            "封面图2X5厨房",
-            "2X5厨房",
-            "2X6厨房",
-            "封面图2X6厨房",
-        ),
-        "其他图片 URL2": pick_named_url(
-            image_df,
-            "封面图2X3门口",
-            "2X3门口",
-        ),
-        "其他图片 URL3": pick_named_url(image_df, "2X5走廊"),
-        "其他图片 URL4": pick_named_url(image_df, "120X170单椅"),
-        "其他图片 URL5": pick_named_url(
-            image_df,
-            "2X5尺寸白底图",
-            "白底图2X5",
-            "2X5白底图",
-        ),
-        "其他图片 URL6": "",
-        "其他图片 URL7": "",
-        "其他图片 URL8": "",
-        "样本图片 URL": pick_sample_url(image_df),
-    }
 
 
-def outdoor_mat_required_image_names(size: str) -> dict[str, str]:
-    """返回三明治户外垫指定尺寸各图片列期望的图片名称。"""
-    normalized_size = normalize_size(size)
-    sample_name = "样本图片 / SWATCH / SWACH / SWITCH / SWICH"
-    if normalized_size == "2.5X8":
-        return {
-            "主图片 URL": "2.5X8户外走廊",
-            "其他图片 URL1": "白底图2X5",
-            "其他图片 URL2": "8X10户外庭院",
-            "其他图片 URL3": "5X7户外庭院",
-            "其他图片 URL4": "3X5户外门口",
-            "其他图片 URL5": (
-                "封面图2X5厨房 / 2X5厨房 / 2X6厨房 / "
-                "封面图2X6厨房（四选一）"
-            ),
-            "其他图片 URL6": "2X5走廊",
-            "样本图片 URL": sample_name,
-        }
-    if normalized_size == "3X5":
-        return {
-            "主图片 URL": "3X5户外门口",
-            "其他图片 URL1": "白底图120X170",
-            "其他图片 URL2": "8X10户外庭院",
-            "其他图片 URL3": "5X7户外庭院",
-            "其他图片 URL4": "2.5X8户外走廊",
-            "其他图片 URL5": "120X170单椅",
-            "其他图片 URL6": "封面图5X7客厅 / 5X7客厅",
-            "其他图片 URL7": "5X7卧室",
-            "样本图片 URL": sample_name,
-        }
-    if normalized_size in {"8X10", "9X12"}:
-        return {
-            "主图片 URL": "8X10户外庭院",
-            "其他图片 URL1": "白底图5X7",
-            "其他图片 URL2": "5X7户外庭院",
-            "其他图片 URL3": "3X5户外门口",
-            "其他图片 URL4": "2.5X8户外走廊",
-            "其他图片 URL5": "封面图5X7客厅 / 5X7客厅",
-            "其他图片 URL6": "120X170单椅",
-            "其他图片 URL7": "5X7卧室",
-            "样本图片 URL": sample_name,
-        }
-    return {
-        "主图片 URL": "5X7户外庭院",
-        "其他图片 URL1": "白底图5X7",
-        "其他图片 URL2": "8X10户外庭院",
-        "其他图片 URL3": "3X5户外门口",
-        "其他图片 URL4": "2.5X8户外走廊",
-        "其他图片 URL5": "封面图5X7客厅 / 5X7客厅",
-        "其他图片 URL6": "120X170单椅",
-        "其他图片 URL7": "5X7卧室",
-        "样本图片 URL": sample_name,
-    }
 
 
-def outdoor_mat_image_values(
-    image_df: pd.DataFrame,
-    size: str,
-) -> dict[str, str]:
-    """按标准化尺寸给三明治户外垫匹配图片 URL。"""
-    required_columns = {"文件名", "图片地址"}
-    missing_columns = sorted(required_columns - set(image_df.columns))
-    if missing_columns:
-        raise ValueError(f"图片数据文件缺少字段：{missing_columns}")
-
-    normalized_size = normalize_size(size)
-    if normalized_size == "2.5X8":
-        values = {
-            "主图片 URL": pick_named_url(image_df, "2.5X8户外走廊"),
-            "其他图片 URL1": pick_named_url(image_df, "白底图2X5"),
-            "其他图片 URL2": pick_named_url(image_df, "8X10户外庭院"),
-            "其他图片 URL3": pick_named_url(image_df, "5X7户外庭院"),
-            "其他图片 URL4": pick_named_url(image_df, "3X5户外门口"),
-            "其他图片 URL5": pick_named_url(
-                image_df,
-                "封面图2X5厨房",
-                "2X5厨房",
-                "2X6厨房",
-                "封面图2X6厨房",
-            ),
-            "其他图片 URL6": pick_named_url(image_df, "2X5走廊"),
-        }
-    elif normalized_size == "3X5":
-        values = {
-            "主图片 URL": pick_named_url(image_df, "3X5户外门口"),
-            "其他图片 URL1": pick_named_url(image_df, "白底图120X170"),
-            "其他图片 URL2": pick_named_url(image_df, "8X10户外庭院"),
-            "其他图片 URL3": pick_named_url(image_df, "5X7户外庭院"),
-            "其他图片 URL4": pick_named_url(image_df, "2.5X8户外走廊"),
-            "其他图片 URL5": pick_named_url(image_df, "120X170单椅"),
-            "其他图片 URL6": pick_named_url(
-                image_df, "封面图5X7客厅", "5X7客厅"
-            ),
-            "其他图片 URL7": pick_named_url(image_df, "5X7卧室"),
-        }
-    elif normalized_size in {"8X10", "9X12"}:
-        values = {
-            "主图片 URL": pick_named_url(image_df, "8X10户外庭院"),
-            "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
-            "其他图片 URL2": pick_named_url(image_df, "5X7户外庭院"),
-            "其他图片 URL3": pick_named_url(image_df, "3X5户外门口"),
-            "其他图片 URL4": pick_named_url(image_df, "2.5X8户外走廊"),
-            "其他图片 URL5": pick_named_url(
-                image_df, "封面图5X7客厅", "5X7客厅"
-            ),
-            "其他图片 URL6": pick_named_url(image_df, "120X170单椅"),
-            "其他图片 URL7": pick_named_url(image_df, "5X7卧室"),
-        }
-    else:
-        values = {
-            "主图片 URL": pick_named_url(image_df, "5X7户外庭院"),
-            "其他图片 URL1": pick_named_url(image_df, "白底图5X7"),
-            "其他图片 URL2": pick_named_url(image_df, "8X10户外庭院"),
-            "其他图片 URL3": pick_named_url(image_df, "3X5户外门口"),
-            "其他图片 URL4": pick_named_url(image_df, "2.5X8户外走廊"),
-            "其他图片 URL5": pick_named_url(
-                image_df, "封面图5X7客厅", "5X7客厅"
-            ),
-            "其他图片 URL6": pick_named_url(image_df, "120X170单椅"),
-            "其他图片 URL7": pick_named_url(image_df, "5X7卧室"),
-        }
-    values.setdefault("其他图片 URL7", "")
-    values["其他图片 URL8"] = ""
-    values["样本图片 URL"] = pick_sample_url(image_df)
-    return values
 
 
 def assign_urls(
@@ -454,7 +281,9 @@ def load_image_data_from_pg(
         ORDER BY skc, id
     """
     with psycopg2.connect(**load_pg_config(config_path)) as connection:
+        connection.set_session(readonly=True)
         with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '15s'")
             cursor.execute(query, (skcs,))
             rows = cursor.fetchall()
 
@@ -483,71 +312,6 @@ def load_image_data_from_pg(
     }
 
 
-def build_image_pool(image_df: pd.DataFrame) -> dict[str, object]:
-    """参考 set_excel.py，按尺寸和图片类型整理印花地毯图片。"""
-    required_columns = {"文件名", "图片地址", "尺寸", "图片类型"}
-    missing_columns = sorted(required_columns - set(image_df.columns))
-    if missing_columns:
-        raise ValueError(f"图片数据文件缺少字段：{missing_columns}")
-
-    image_df = image_df.copy()
-    image_df["标准尺寸"] = image_df["尺寸"].map(normalize_size)
-    image_df["标准图片类型"] = image_df["图片类型"].map(normalize_text)
-
-    # 白底图再次按 file_name 校准尺寸，使手工构造的数据也遵循文件名优先。
-    white_mask = image_df["标准图片类型"] == "白底图"
-    white_name_sizes = image_df.loc[white_mask, "文件名"].map(
-        size_from_image_name
-    )
-    usable_white_name_sizes = white_name_sizes[white_name_sizes != ""]
-    image_df.loc[
-        usable_white_name_sizes.index,
-        "标准尺寸",
-    ] = usable_white_name_sizes
-
-    # 印花地毯不接受“<SKC>-<尺寸>.jpg”这类误上传裸文件名。
-    # 将其从候选池移除，避免凭较小 id 抢占“其他图片 URL1”等位置。
-    if "SKC" in image_df.columns:
-        bare_name_mask = image_df.apply(
-            lambda row: is_bare_skc_size_image(
-                row["文件名"],
-                row["SKC"],
-                row["标准尺寸"],
-            ),
-            axis=1,
-        )
-        image_df = image_df.loc[~bare_name_mask].copy()
-
-    def by(size_values: Iterable[str], image_type: str) -> pd.DataFrame:
-        return image_df[
-            image_df["标准尺寸"].isin(set(size_values))
-            & (image_df["标准图片类型"] == image_type)
-        ]
-
-    main_57 = urls(by(["5X7", "120X170"], "主图片"))
-    other_57 = urls(by(["5X7", "120X170"], "其他图片"))
-    main_25 = urls(by(["2X5"], "主图片"))
-    other_25 = urls(by(["2X5"], "其他图片"))
-
-    main_by_size = {
-        size: first_url(by([size], "主图片"))
-        for size in image_df["标准尺寸"].dropna().unique()
-    }
-    white_by_size = {
-        size: first_url(by([size], "白底图"))
-        for size in image_df["标准尺寸"].dropna().unique()
-    }
-
-    return {
-        "sample": first_url(by(["特殊"], "样本图片")),
-        "main_57": main_57,
-        "other_57": other_57,
-        "main_25": main_25,
-        "other_25": other_25,
-        "main_by_size": main_by_size,
-        "white_by_size": white_by_size,
-        "main_23_named": pick_named_url(image_df, "2X3门口", "2X3玄关"),
-    }
 
 
 def value_at(values: list[str], index: int) -> str:
@@ -555,273 +319,60 @@ def value_at(values: list[str], index: int) -> str:
     return values[index] if index < len(values) else ""
 
 
-def required_rug_image_names(size: str) -> dict[str, str]:
-    """返回印花地毯指定尺寸各图片列期望的图片名称。"""
-    names = {"样本图片 URL": "特殊尺寸的样本图片"}
-    if size == "2X3":
-        names.update({
-            "主图片 URL": "2X3门口 / 2X3玄关 / 2X3主图片",
-            "其他图片 URL1": "2X3白底图",
-            "其他图片 URL2": "5X7或120X170主图片1",
-            "其他图片 URL3": "5X7或120X170其他图片1",
-            "其他图片 URL4": "5X7或120X170其他图片2",
-            "其他图片 URL5": "2X5主图片1",
-            "其他图片 URL6": "2X5其他图片1",
-        })
-    elif size in {"2X5", "2X6", "2X7"}:
-        names.update({
-            "主图片 URL": f"{size}主图片",
-            "其他图片 URL1": "2X5其他图片1",
-            "其他图片 URL2": f"{size}白底图 / 2X5白底图",
-            "其他图片 URL3": "5X7或120X170主图片1",
-            "其他图片 URL4": "5X7或120X170其他图片1",
-            "其他图片 URL5": "5X7或120X170其他图片2",
-            "其他图片 URL6": "2X3门口 / 2X3玄关 / 2X3主图片",
-        })
-    elif size in {"5X7", "8X10"}:
-        names.update({
-            "主图片 URL": "5X7或120X170主图片1",
-            "其他图片 URL1": "5X7或120X170其他图片1",
-            "其他图片 URL2": "5X7或120X170其他图片2",
-            "其他图片 URL3": "5X7白底图",
-            "其他图片 URL4": "2X5主图片1",
-            "其他图片 URL5": "2X5其他图片1",
-            "其他图片 URL6": "2X3门口 / 2X3玄关 / 2X3主图片",
-        })
-    else:
-        names["主图片 URL"] = f"{size}主图片"
-    return names
 
 
-def collect_missing_images(
-    skc: str,
-    material: str,
-    size: str,
-    values: dict[str, str],
-) -> list[dict[str, str]]:
-    """收集一个 SKC 当前尺寸按规则应有但未匹配到的图片。"""
-    if material == KITCHEN_MAT_MATERIAL:
-        required_names = KITCHEN_MAT_IMAGE_NAMES
-    elif material == OUTDOOR_MAT_MATERIAL:
-        required_names = outdoor_mat_required_image_names(size)
-    else:
-        required_names = required_rug_image_names(size)
-
-    return [
-        {
-            "skc": skc,
-            "material": material,
-            "size": size,
-            "target_column": target_column,
-            "required_image": required_image,
-        }
-        for target_column, required_image in required_names.items()
-        if not normalize_text(values.get(target_column, ""))
-    ]
 
 
-def image_values_for_size(size: str, pool: dict[str, object]) -> dict[str, str]:
-    """生成某个商品尺寸应写入的图片列，规则与 set_excel.py 保持一致。"""
-    main_57 = pool["main_57"]
-    other_57 = pool["other_57"]
-    main_25 = pool["main_25"]
-    other_25 = pool["other_25"]
-    main_by_size = pool["main_by_size"]
-    white_by_size = pool["white_by_size"]
-    main_23 = pool["main_23_named"] or main_by_size.get("2X3", "")
-
-    values = {"样本图片 URL": pool["sample"]}
-
-    if size == "2X3":
-        values.update({
-            "主图片 URL": main_23,
-            "其他图片 URL1": white_by_size.get("2X3", ""),
-            "其他图片 URL2": value_at(main_57, 0),
-            "其他图片 URL3": value_at(other_57, 0),
-            "其他图片 URL4": value_at(other_57, 1),
-            "其他图片 URL5": value_at(main_25, 0),
-            "其他图片 URL6": value_at(other_25, 0),
-        })
-    elif size in {"2X5", "2X6", "2X7"}:
-        values.update({
-            "主图片 URL": main_by_size.get(size, ""),
-            "其他图片 URL1": value_at(other_25, 0),
-            "其他图片 URL2": white_by_size.get(size, "")
-            or white_by_size.get("2X5", ""),
-            "其他图片 URL3": value_at(main_57, 0),
-            "其他图片 URL4": value_at(other_57, 0),
-            "其他图片 URL5": value_at(other_57, 1),
-            "其他图片 URL6": main_23,
-        })
-    elif size in {"5X7", "8X10"}:
-        values.update({
-            "主图片 URL": value_at(main_57, 0),
-            "其他图片 URL1": value_at(other_57, 0),
-            "其他图片 URL2": value_at(other_57, 1),
-            "其他图片 URL3": white_by_size.get("5X7", ""),
-            "其他图片 URL4": value_at(main_25, 0),
-            "其他图片 URL5": value_at(other_25, 0),
-            "其他图片 URL6": main_23,
-        })
-    else:
-        values["主图片 URL"] = main_by_size.get(size, "")
-
-    return values
 
 
 def match_rug_images(
     input_path: Path,
     output_path: Path,
     pg_config_path: Path = DEFAULT_PG_CONFIG_PATH,
+    image_version: str | None = None,
 ) -> dict[str, object]:
-    """读取目标 Excel，并按材质方向给 SKC 匹配图片。"""
-    if not input_path.is_file():
-        raise FileNotFoundError(f"目标 Excel 不存在：{input_path}")
-
-    target_df = pd.read_excel(input_path)
-    required_columns = {"SKC", "材质方向", "size_text"}
-    missing_columns = sorted(required_columns - set(target_df.columns))
-    if missing_columns:
-        raise ValueError(f"目标 Excel 缺少字段：{missing_columns}")
-
+    """按数据库规则填图，逐行支持不同材质，缺少尺寸配置时停止。"""
+    from pg_v2_set_excel_by_skc_size import load_enabled_image_version, version_image_values, rules_for_size
+    target = pd.read_excel(input_path)
+    required = {'SKC', '材质方向', 'size_text'}
+    if not required.issubset(target.columns):
+        raise ValueError(f"目标 Excel 缺少字段：{sorted(required - set(target.columns))}")
     for column in IMAGE_COLUMNS:
-        if column not in target_df.columns:
-            target_df[column] = ""
-        target_df[column] = target_df[column].astype(object)
-
-    target_df["SKC"] = target_df["SKC"].map(normalize_text)
-    target_df["材质方向"] = target_df["材质方向"].map(normalize_text)
-
-    processed_skcs: list[str] = []
-    missing_image_skcs: list[str] = []
-    missing_image_details: list[dict[str, str]] = []
-    skipped_skcs: dict[str, str] = {}
+        if column not in target:
+            target[column] = ''
+        target[column] = target[column].astype(object)
+    target['SKC'] = target['SKC'].map(normalize_text)
+    target['材质方向'] = target['材质方向'].map(normalize_text)
+    versions = {}
+    eligible = []
+    for index, row in target.iterrows():
+        size, skc, material = normalize_size(row['size_text']), row['SKC'], row['材质方向']
+        if not skc or not size:
+            continue
+        if material not in versions:
+            versions[material] = load_enabled_image_version(image_version, pg_config_path, material)
+        rules = rules_for_size(versions[material], size)
+        eligible.append((index, skc, material, size, rules))
+    images = load_image_data_from_pg(list(dict.fromkeys(r[1] for r in eligible)), pg_config_path)
+    processed, missing, details = [], [], []
     matched_rows = 0
-
-    skcs = list(dict.fromkeys(value for value in target_df["SKC"] if value))
-    image_data_by_skc = load_image_data_from_pg(skcs, pg_config_path)
-    for skc in skcs:
-        skc_rows = target_df[target_df["SKC"] == skc]
-        materials = list(dict.fromkeys(
-            value for value in skc_rows["材质方向"].tolist() if value
-        ))
-        if len(materials) != 1 or materials[0] not in SUPPORTED_MATERIALS:
-            skipped_skcs[skc] = (
-                f"材质方向不受支持或不唯一：{materials or ['<空>']}"
-            )
-            continue
-        material = materials[0]
-
-        image_df = image_data_by_skc.get(skc)
-        if image_df is None or image_df.empty:
-            missing_image_skcs.append(skc)
-            for row_index in skc_rows.index:
-                size = normalize_size(target_df.at[row_index, "size_text"])
-                if size:
-                    missing_image_details.extend(
-                        collect_missing_images(skc, material, size, {})
-                    )
-            skipped_skcs[skc] = (
-                "数据库 public.ods_fbm_image_upload 中没有可用图片记录"
-            )
-            continue
-
-        if material == RUG_MATERIAL:
-            pool = build_image_pool(image_df)
-            fixed_values = None
-        elif material == KITCHEN_MAT_MATERIAL:
-            pool = None
-            fixed_values = kitchen_mat_image_values(image_df)
+    for index, skc, material, size, rules in eligible:
+        frame = images.get(skc)
+        values, required_names = version_image_values(frame, rules, size)
+        target.loc[index, IMAGE_COLUMNS] = ''
+        assign_urls(target, index, values)
+        details.extend(dict(skc=skc, material=material, size=size, target_column=slot, required_image=name)
+                       for slot, name in required_names.items() if not values[slot])
+        if frame is None or frame.empty:
+            missing.append(skc)
         else:
-            pool = None
-            fixed_values = None
-
-        for row_index in skc_rows.index:
-            size = normalize_size(target_df.at[row_index, "size_text"])
-            if not size:
-                continue
-            if material == RUG_MATERIAL:
-                values = image_values_for_size(size, pool)
-            elif material == OUTDOOR_MAT_MATERIAL:
-                values = outdoor_mat_image_values(image_df, size)
-            else:
-                values = fixed_values
-            target_df.loc[row_index, IMAGE_COLUMNS] = ""
-            assign_urls(target_df, row_index, values)
-            missing_image_details.extend(
-                collect_missing_images(skc, material, size, values)
-            )
+            processed.append(skc)
             matched_rows += 1
-        processed_skcs.append(skc)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    target_df.to_excel(output_path, index=False)
-    return {
-        "output_path": output_path,
-        "processed_skcs": processed_skcs,
-        "missing_image_skcs": missing_image_skcs,
-        "missing_image_details": missing_image_details,
-        "skipped_skcs": skipped_skcs,
-        "matched_rows": matched_rows,
-    }
-
-
-def check_christmas_skc_images(skcs, pg_config_path, sizes=None):
-    """圣诞检查使用管理站的指定版本；只读规则和图片，不生成 Excel。"""
-    with psycopg2.connect(**load_pg_config(pg_config_path)) as connection:
-        connection.set_session(readonly=True)
-        with connection.cursor() as cursor:
-            cursor.execute("SET LOCAL statement_timeout = '15s'")
-            cursor.execute("""
-                SELECT rules_schema_version, rules_config
-                FROM public.listing_image_versions
-                WHERE platform = %s AND material_direction = %s AND version_name = %s
-            """, ('amazon', RUG_MATERIAL, CHRISTMAS_IMAGE_VERSION))
-            rows = cursor.fetchall()
-    if len(rows) != 1:
-        raise ValueError(f"圣诞图片检查需要唯一的 Amazon / 印花地毯 / {CHRISTMAS_IMAGE_VERSION}，实际 {len(rows)} 个")
-    schema, config = rows[0]
-    if schema != 1 or not isinstance(config, dict) or not config.get('groups'):
-        raise ValueError('圣诞图片版本规则为空或结构不兼容')
-    requested_sizes = {normalize_size(size) for size in sizes} if sizes is not None else None
-    check_sizes, required = [], []
-    for group in config['groups']:
-        group_sizes = [normalize_size(size) for size in group['sizes']]
-        if requested_sizes is not None and not requested_sizes.intersection(group_sizes):
-            continue
-        check_sizes.extend(size for size in group_sizes if requested_sizes is None or size in requested_sizes)
-        for slot in IMAGE_COLUMNS:
-            rule = group['rules'][slot]
-            if rule['primary'] == '留空':
-                continue
-            names = [rule['primary'], *rule.get('alternatives', [])]
-            if not all(isinstance(name, str) and name.strip() for name in names):
-                raise ValueError(f'圣诞图片版本的 {slot} 文件名规则无效')
-            # 明细按 SKC + 所需图片名去重；同一张图被多个尺寸使用只检查一次。
-            keywords = tuple(names)
-            if keywords not in required:
-                required.append(keywords)
-    check_sizes = list(dict.fromkeys(check_sizes))
-    if not check_sizes or not required or (requested_sizes is not None and requested_sizes - set(check_sizes)):
-        raise ValueError('圣诞图片版本未完整配置要检查的尺寸或图片')
-    normalized_skcs = list(dict.fromkeys(filter(None, (normalize_text(skc) for skc in skcs))))
-    image_data = load_image_data_from_pg(normalized_skcs, pg_config_path)
-    missing_skcs, details = [], []
-    for skc in normalized_skcs:
-        frame = image_data.get(skc)
-        absent = frame is None or frame.empty
-        if absent:
-            missing_skcs.append(skc)
-        for names in required:
-            if absent or not pick_named_url(frame, *names):
-                details.append((skc, ' 或 '.join(names)))
-    return {
-        'material': CHRISTMAS_RUG_MATERIAL,
-        'checked_skcs': normalized_skcs,
-        'checked_sizes': check_sizes,
-        'missing_image_skcs': missing_skcs,
-        'missing_image_details': details,
-    }
+    target.to_excel(output_path, index=False)
+    return dict(output_path=output_path, processed_skcs=list(dict.fromkeys(processed)),
+                missing_image_skcs=list(dict.fromkeys(missing)), missing_image_details=details,
+                skipped_skcs={}, matched_rows=matched_rows)
 
 
 def check_skc_image_completeness(
@@ -829,72 +380,32 @@ def check_skc_image_completeness(
     material: str,
     pg_config_path: Path = DEFAULT_PG_CONFIG_PATH,
     sizes: Iterable[str] | None = None,
+    image_version: str | None = None,
 ) -> dict[str, object]:
-    """不生成 Excel，直接检查一批 SKC 是否具备材质所需图片。"""
-    material = normalize_text(material)
-    if material == CHRISTMAS_RUG_MATERIAL:
-        return check_christmas_skc_images(skcs, pg_config_path, sizes)
-    if material not in SUPPORTED_MATERIALS:
-        raise ValueError(f"不支持的材质方向：{material or '<空>'}")
-
-    normalized_skcs = list(dict.fromkeys(
-        skc for skc in (normalize_text(value) for value in skcs) if skc
-    ))
-    check_sizes = list(dict.fromkeys(
-        size
-        for size in (
-            normalize_size(value)
-            for value in (sizes or DEFAULT_IMAGE_CHECK_SIZES[material])
-        )
-        if size
-    ))
-    if not check_sizes:
-        raise ValueError("图片完整性检查尺寸不能为空")
-
-    image_data_by_skc = load_image_data_from_pg(normalized_skcs, pg_config_path)
-    missing_image_skcs: list[str] = []
-    missing_image_details: list[dict[str, str]] = []
-
+    """尺寸、必需图片和排列全部取数据库唯一启用版本。"""
+    from pg_v2_set_excel_by_skc_size import load_enabled_image_version, version_image_values, rules_for_size
+    version = load_enabled_image_version(image_version, pg_config_path, normalize_text(material))
+    normalized_skcs = list(dict.fromkeys(normalize_text(v) for v in skcs if normalize_text(v)))
+    concrete_sizes = [s for s in version['rules_by_size'] if s not in {'其他', '全部尺寸'}]
+    check_sizes = list(dict.fromkeys(normalize_size(s) for s in (sizes or concrete_sizes or list(version['rules_by_size']))))
+    for size in check_sizes:
+        rules_for_size(version, size)
+    images = load_image_data_from_pg(normalized_skcs, pg_config_path)
+    missing_skcs, details = [], []
     for skc in normalized_skcs:
-        image_df = image_data_by_skc.get(skc)
-        if image_df is None or image_df.empty:
-            missing_image_skcs.append(skc)
-            for size in check_sizes:
-                missing_image_details.extend(
-                    collect_missing_images(skc, material, size, {})
-                )
-            continue
+        frame = images.get(skc)
+        if frame is None or frame.empty:
+            missing_skcs.append(skc)
+        for size in check_sizes:
+            values, required = version_image_values(frame, rules_for_size(version, size), size)
+            details.extend((skc, name) for slot, name in required.items() if not values[slot])
+    return dict(checked_skcs=normalized_skcs, checked_sizes=check_sizes,
+                missing_image_skcs=missing_skcs, missing_image_details=list(dict.fromkeys(details)),
+                image_version=version['version_name'])
 
-        if material == RUG_MATERIAL:
-            pool = build_image_pool(image_df)
-            for size in check_sizes:
-                values = image_values_for_size(size, pool)
-                missing_image_details.extend(
-                    collect_missing_images(skc, material, size, values)
-                )
-        elif material == KITCHEN_MAT_MATERIAL:
-            values = kitchen_mat_image_values(image_df)
-            missing_image_details.extend(
-                collect_missing_images(skc, material, check_sizes[0], values)
-            )
-        else:
-            for size in check_sizes:
-                values = outdoor_mat_image_values(image_df, size)
-                missing_image_details.extend(
-                    collect_missing_images(skc, material, size, values)
-                )
 
-    unique_details = list(dict.fromkeys(
-        (item["skc"], item["required_image"])
-        for item in missing_image_details
-    ))
-    return {
-        "material": material,
-        "checked_skcs": normalized_skcs,
-        "checked_sizes": check_sizes,
-        "missing_image_skcs": list(dict.fromkeys(missing_image_skcs)),
-        "missing_image_details": unique_details,
-    }
+def check_christmas_skc_images(skcs, pg_config_path, sizes=None):
+    return check_skc_image_completeness(skcs, CHRISTMAS_RUG_MATERIAL, pg_config_path, sizes)
 
 
 def save_image_check_reports(
@@ -930,6 +441,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="从 PostgreSQL 按 SKC、材质方向和尺寸匹配图片 URL"
     )
+    parser.add_argument('--image-version', '--version-name', help='指定数据库已启用版本；省略时按 Excel 材质自动选择唯一启用版本')
     parser.add_argument(
         "input_path",
         nargs="?",
@@ -1097,7 +609,7 @@ def main() -> None:
             output_path = default_output_path(input_path)
 
         try:
-            result = match_rug_images(input_path, output_path, args.pg_config)
+            result = match_rug_images(input_path, output_path, args.pg_config, image_version=args.image_version)
         except Exception as exc:
             failed_files.append((input_path, str(exc)))
             print(f"处理失败，继续下一文件：{input_path.name}，原因：{exc}")

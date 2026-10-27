@@ -110,7 +110,16 @@ https://wit0jhu6kvu.feishu.cn/wiki/BeTcwtVfJidBvikXhCMcIp0MnU3?table=tbluo8xCboM
 python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images
 ```
 
-这个一键入口会先读取飞书候选 SKC，再复用 `pg_set_excel_by_skc_size.py` 的 PostgreSQL 查询和图片匹配规则执行只读检查，不会生成或修改上架 Excel。印花地毯默认检查 `2X3`、`2X5`、`5X7`、`8X10` 四个标准产品尺寸。缺少任一必需图片的 SKC 会写入缺图报告，并从最终 `SKCS.txt` 排除；只有图片齐全的 SKC 才会写入清单。图片检查失败时不会覆盖原有 `SKCS.txt`。
+这个一键入口会先读取飞书候选 SKC，再按 `public.listing_image_versions` 中该材质唯一启用的 Amazon 版本执行只读图片检查。检查尺寸、图片名称、候选名称、顺序和必需图片全部取数据库，不再使用代码中的固定尺寸表。缺少任一必需图片的 SKC 会从最终 `SKCS.txt` 排除；检查失败不覆盖原有清单。数据库的“其他”是显式通配规则，不作为独立商品尺寸检查；“全部尺寸”用于所有商品尺寸共用图片。
+
+可通过 `--image-version` 指定已启用版本名称：
+
+```powershell
+python fetch_skcs_by_material.py --material-direction "印花地毯" --check-images --image-version "批量上架v1" --no-group-notification
+python pg_set_excel_by_skc_size.py --image-version "批量上架v1" --no-group-notification
+```
+
+省略版本名时按材质自动选择唯一启用版本；缺失、重名、未启用或规则无效都会报错，不回退旧规则。圣诞材质映射数据库的“印花地毯”分类，使用圣诞图片前需在管理站启用相应版本。普通、厨房垫、三明治和圣诞的检查与填图共用 `pg_v2_set_excel_by_skc_size.py` 的数据库规则解析器，支持文件名优先匹配及数据库配置的“尺寸＋图片类型＋第几张”。管理站预览也读取启用版本。6X9 是否共用 8X10，由数据库中的两组配置决定。
 
 检查结果会写入：
 
@@ -134,7 +143,7 @@ python fetch_skcs_by_material.py --material-direction "印花地毯" --check-ima
 | 仿羊绒厨房垫 | `vewyE7tvJK` |
 | 三明治户外垫 | `vew0xHeRAu` |
 
-圣诞材质的 `--check-images` 读取 `public.listing_image_versions` 中 Amazon / 印花地毯 / `2026圣诞专题v1` 的尺寸和规则，按首选与候选文件名检查，支持有无“封面图”前缀及大小写差异。该命名版本必须唯一，缺失或规则无效时停止，不覆盖原 SKCS.txt。Excel 按数据库版本填图使用下文的 `pg_v2_set_excel_by_skc_size.py --image-version`。
+圣诞材质也按数据库唯一启用的 Amazon / 印花地毯版本检查；可加 `--image-version "2026圣诞专题v1"` 显式指定已启用圣诞版本。按首选与候选名称匹配，兼容有无“封面图”前缀及大小写差异。版本缺失、未启用或规则无效时停止，不覆盖原 SKCS.txt。
 
 脚本分页读取视图中的 `SKC` 字段，清理空行并按出现顺序去重，然后覆盖写入 `D:\NAS_download\SKCS.txt`（UTF-8、每行一个 SKC）。未设置 `--no-group-notification` 时，写入成功后会向配置的飞书机器人群发送材质方向、SKC 数量、保存位置和 SKC 明细；明细过长时自动分段发送。视图没有数据时会生成空文件。
 
@@ -270,7 +279,7 @@ D:\项目文件\AI自动上架\缺少图片的SKC.txt
 
 #### 按数据库中的已启用版本填图
 
-`pg_v2_set_excel_by_skc_size.py` 只使用数据库规则，必须通过 `--image-version`（别名 `--version-name`）选择图片版本；不传参数会直接报错。例如批量处理默认目录中的待匹配 Excel：
+`pg_v2_set_excel_by_skc_size.py` 只使用数据库规则，通过 `--image-version`（别名 `--version-name`）选择已启用图片版本；同名版本分属不同材质时加 `--material-direction`。`pg_set_excel_by_skc_size.py` 同样使用数据库规则，支持不传版本名、按 Excel 各行材质自动选择。例如批量处理默认目录中的待匹配 Excel：
 
 ```powershell
 python pg_v2_set_excel_by_skc_size.py --image-version "2026圣诞专题v1" --no-group-notification
